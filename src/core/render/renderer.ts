@@ -9,7 +9,7 @@ import {
   type RenderTarget,
   requireFloatColorBufferSupport
 } from "./glUtils";
-import { buildDisplayShaderSources, buildSceneShaderSources } from "./shaderComposer";
+import { buildDisplayShaderSources, buildFocusProbeShaderSources, buildSceneShaderSources } from "./shaderComposer";
 
 interface SceneState {
   geometrySource: string;
@@ -80,6 +80,10 @@ export class FragmentRenderer {
 
   private sceneProgram: WebGLProgram | null = null;
 
+  private focusProbeProgram: WebGLProgram | null = null;
+
+  private focusProbeTarget: RenderTarget | null = null;
+
   private readTarget: RenderTarget | null = null;
 
   private writeTarget: RenderTarget | null = null;
@@ -123,6 +127,10 @@ export class FragmentRenderer {
     fov: 0.4
   };
 
+  private readonly focusProbeReadback = new Float32Array(4);
+
+  private frameSeed = 1;
+
   constructor(canvas: HTMLCanvasElement, options: RendererOptions) {
     this.canvas = canvas;
     this.gl = assertWebGl2(canvas);
@@ -145,11 +153,24 @@ export class FragmentRenderer {
       integrator: next.integrator
     });
 
+    const focusProbeSources = buildFocusProbeShaderSources({
+      geometrySource: next.geometrySource
+    });
+
     const program = createProgram(this.gl, sources.vertexSource, sources.fragmentSource);
+    const focusProgram = createProgram(
+      this.gl,
+      focusProbeSources.vertexSource,
+      focusProbeSources.fragmentSource
+    );
     if (this.sceneProgram !== null) {
       this.gl.deleteProgram(this.sceneProgram);
     }
+    if (this.focusProbeProgram !== null) {
+      this.gl.deleteProgram(this.focusProbeProgram);
+    }
     this.sceneProgram = program;
+    this.focusProbeProgram = focusProgram;
 
     this.sceneState = {
       geometrySource: next.geometrySource,
@@ -300,6 +321,10 @@ export class FragmentRenderer {
       this.gl.deleteProgram(this.sceneProgram);
       this.sceneProgram = null;
     }
+    if (this.focusProbeProgram !== null) {
+      this.gl.deleteProgram(this.focusProbeProgram);
+      this.focusProbeProgram = null;
+    }
     this.gl.deleteProgram(this.displayProgram);
 
     if (this.readTarget !== null) {
@@ -310,8 +335,54 @@ export class FragmentRenderer {
       deleteRenderTarget(this.gl, this.writeTarget);
       this.writeTarget = null;
     }
+    if (this.focusProbeTarget !== null) {
+      deleteRenderTarget(this.gl, this.focusProbeTarget);
+      this.focusProbeTarget = null;
+    }
 
     console.info("[renderer] Destroyed WebGL resources.");
+  }
+
+  sampleFocusDistance(focusUv: [number, number]): number | null {
+    if (this.sceneState === null || this.focusProbeProgram === null) {
+      return null;
+    }
+
+    if (this.focusProbeTarget === null) {
+      this.focusProbeTarget = createRenderTarget(this.gl, 1, 1);
+    }
+
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.focusProbeTarget.framebuffer);
+    gl.viewport(0, 0, 1, 1);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.useProgram(this.focusProbeProgram);
+
+    this.setVec3Uniform(this.focusProbeProgram, "uEye", this.camera.eye);
+    this.setVec3Uniform(this.focusProbeProgram, "uTarget", this.camera.target);
+    this.setVec3Uniform(this.focusProbeProgram, "uUp", this.camera.up);
+    this.setFloatUniform(this.focusProbeProgram, "uFov", this.camera.fov);
+    this.setVec2Uniform(this.focusProbeProgram, "uFocusUv", [clamp(focusUv[0], 0, 1), clamp(focusUv[1], 0, 1)]);
+    this.setVec2Uniform(this.focusProbeProgram, "uViewportSize", [
+      Math.max(1, this.currentWidth),
+      Math.max(1, this.currentHeight)
+    ]);
+    this.setFloatUniform(this.focusProbeProgram, "uDetailExp", this.getIntegratorOptionValue("detailExp", -2.3));
+    this.setIntUniform(this.focusProbeProgram, "uMaxRaySteps", Math.trunc(this.getIntegratorOptionValue("maxRaySteps", 192)));
+    this.setFloatUniform(this.focusProbeProgram, "uMaxDistance", this.getIntegratorOptionValue("maxDistance", 1200));
+    this.setFloatUniform(this.focusProbeProgram, "uFudgeFactor", this.getIntegratorOptionValue("fudgeFactor", 1));
+
+    this.uploadSceneUniformValues(this.focusProbeProgram);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, this.focusProbeReadback);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    const value = this.focusProbeReadback[0];
+    if (!Number.isFinite(value) || value <= 0) {
+      return null;
+    }
+    return value;
   }
 
   private readonly tick = (now: number): void => {
@@ -485,35 +556,27 @@ export class FragmentRenderer {
     this.setVec2Uniform(this.sceneProgram, "uResolution", [this.writeTarget.width, this.writeTarget.height]);
     this.setFloatUniform(this.sceneProgram, "uTime", now * 0.001);
     this.setIntUniform(this.sceneProgram, "uSubframe", this.subframe);
+    this.setIntUniform(this.sceneProgram, "uFrameIndex", this.nextFrameSeed());
     this.setBoolUniform(this.sceneProgram, "uUseBackbuffer", this.subframe > 0 ? 1 : 0);
 
     this.setVec3Uniform(this.sceneProgram, "uEye", this.camera.eye);
     this.setVec3Uniform(this.sceneProgram, "uTarget", this.camera.target);
     this.setVec3Uniform(this.sceneProgram, "uUp", this.camera.up);
     this.setFloatUniform(this.sceneProgram, "uFov", this.camera.fov);
+    this.setFloatUniform(this.sceneProgram, "uLensAperture", this.getIntegratorOptionValue("aperture", 0));
+    this.setFloatUniform(
+      this.sceneProgram,
+      "uLensFocalDistance",
+      this.getIntegratorOptionValue("focalDistance", this.getTargetDistance())
+    );
+    this.setFloatUniform(this.sceneProgram, "uAAStrength", this.getIntegratorOptionValue("aaJitter", 1));
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.readTarget.texture);
     this.setIntUniform(this.sceneProgram, "uBackbuffer", 0);
 
-    for (const def of this.sceneState.uniformDefinitions) {
-      const value = this.sceneState.uniformValues[def.name];
-      if (value === undefined) {
-        continue;
-      }
-      this.uploadUniform(def.type, def.name, value);
-    }
-
-    for (const option of this.sceneState.integrator.options) {
-      const value = this.sceneState.integratorOptions[option.key];
-      const uniformName = `uIntegrator_${option.key}`;
-      const isInt = option.step === 1 && Number.isInteger(option.defaultValue);
-      if (isInt) {
-        this.setIntUniform(this.sceneProgram, uniformName, Math.trunc(value));
-      } else {
-        this.setFloatUniform(this.sceneProgram, uniformName, value);
-      }
-    }
+    this.uploadSceneUniformValues(this.sceneProgram);
+    this.uploadIntegratorUniformValues(this.sceneProgram);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disable(gl.SCISSOR_TEST);
@@ -535,35 +598,27 @@ export class FragmentRenderer {
     this.setVec2Uniform(this.sceneProgram, "uResolution", [this.readTarget.width, this.readTarget.height]);
     this.setFloatUniform(this.sceneProgram, "uTime", now * 0.001);
     this.setIntUniform(this.sceneProgram, "uSubframe", 0);
+    this.setIntUniform(this.sceneProgram, "uFrameIndex", this.nextFrameSeed());
     this.setBoolUniform(this.sceneProgram, "uUseBackbuffer", 0);
 
     this.setVec3Uniform(this.sceneProgram, "uEye", this.camera.eye);
     this.setVec3Uniform(this.sceneProgram, "uTarget", this.camera.target);
     this.setVec3Uniform(this.sceneProgram, "uUp", this.camera.up);
     this.setFloatUniform(this.sceneProgram, "uFov", this.camera.fov);
+    this.setFloatUniform(this.sceneProgram, "uLensAperture", this.getIntegratorOptionValue("aperture", 0));
+    this.setFloatUniform(
+      this.sceneProgram,
+      "uLensFocalDistance",
+      this.getIntegratorOptionValue("focalDistance", this.getTargetDistance())
+    );
+    this.setFloatUniform(this.sceneProgram, "uAAStrength", this.getIntegratorOptionValue("aaJitter", 1));
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.writeTarget.texture);
     this.setIntUniform(this.sceneProgram, "uBackbuffer", 0);
 
-    for (const def of this.sceneState.uniformDefinitions) {
-      const value = this.sceneState.uniformValues[def.name];
-      if (value === undefined) {
-        continue;
-      }
-      this.uploadUniform(def.type, def.name, value);
-    }
-
-    for (const option of this.sceneState.integrator.options) {
-      const value = this.sceneState.integratorOptions[option.key];
-      const uniformName = `uIntegrator_${option.key}`;
-      const isInt = option.step === 1 && Number.isInteger(option.defaultValue);
-      if (isInt) {
-        this.setIntUniform(this.sceneProgram, uniformName, Math.trunc(value));
-      } else {
-        this.setFloatUniform(this.sceneProgram, uniformName, value);
-      }
-    }
+    this.uploadSceneUniformValues(this.sceneProgram);
+    this.uploadIntegratorUniformValues(this.sceneProgram);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disable(gl.SCISSOR_TEST);
@@ -646,45 +701,104 @@ export class FragmentRenderer {
     };
   }
 
-  private uploadUniform(type: UniformDefinition["type"], name: string, value: UniformValue): void {
-    if (this.sceneProgram === null) {
+  private uploadSceneUniformValues(program: WebGLProgram): void {
+    if (this.sceneState === null) {
       return;
     }
 
+    for (const def of this.sceneState.uniformDefinitions) {
+      const value = this.sceneState.uniformValues[def.name];
+      if (value === undefined) {
+        continue;
+      }
+      this.uploadUniformToProgram(program, def.type, def.name, value);
+    }
+  }
+
+  private uploadIntegratorUniformValues(program: WebGLProgram): void {
+    if (this.sceneState === null) {
+      return;
+    }
+
+    for (const option of this.sceneState.integrator.options) {
+      const value = this.sceneState.integratorOptions[option.key];
+      const uniformName = `uIntegrator_${option.key}`;
+      const isInt = option.step === 1 && Number.isInteger(option.defaultValue);
+      if (isInt) {
+        this.setIntUniform(program, uniformName, Math.trunc(value));
+      } else {
+        this.setFloatUniform(program, uniformName, value);
+      }
+    }
+  }
+
+  private uploadUniformToProgram(
+    program: WebGLProgram,
+    type: UniformDefinition["type"],
+    name: string,
+    value: UniformValue
+  ): void {
     switch (type) {
       case "float":
-        this.setFloatUniform(this.sceneProgram, name, Number(value));
+        this.setFloatUniform(program, name, Number(value));
         return;
       case "int":
-        this.setIntUniform(this.sceneProgram, name, Math.trunc(Number(value)));
+        this.setIntUniform(program, name, Math.trunc(Number(value)));
         return;
       case "bool":
-        this.setBoolUniform(this.sceneProgram, name, value === true ? 1 : 0);
+        this.setBoolUniform(program, name, value === true ? 1 : 0);
         return;
       case "vec2": {
         if (!Array.isArray(value) || value.length !== 2) {
           throw new Error(`Uniform ${name} expected vec2 value.`);
         }
-        this.setVec2Uniform(this.sceneProgram, name, [value[0], value[1]]);
+        this.setVec2Uniform(program, name, [value[0], value[1]]);
         return;
       }
       case "vec3": {
         if (!Array.isArray(value) || value.length !== 3) {
           throw new Error(`Uniform ${name} expected vec3 value.`);
         }
-        this.setVec3Uniform(this.sceneProgram, name, [value[0], value[1], value[2]]);
+        this.setVec3Uniform(program, name, [value[0], value[1], value[2]]);
         return;
       }
       case "vec4": {
         if (!Array.isArray(value) || value.length !== 4) {
           throw new Error(`Uniform ${name} expected vec4 value.`);
         }
-        this.setVec4Uniform(this.sceneProgram, name, [value[0], value[1], value[2], value[3]]);
+        this.setVec4Uniform(program, name, [value[0], value[1], value[2], value[3]]);
         return;
       }
       default:
         return;
     }
+  }
+
+  private getIntegratorOptionValue(key: string, fallback: number): number {
+    if (this.sceneState === null) {
+      return fallback;
+    }
+
+    const option = this.sceneState.integrator.options.find((entry) => entry.key === key);
+    if (option === undefined) {
+      return fallback;
+    }
+
+    const raw = this.sceneState.integratorOptions[key];
+    return Number.isFinite(raw) ? raw : option.defaultValue;
+  }
+
+  private getTargetDistance(): number {
+    const dx = this.camera.target[0] - this.camera.eye[0];
+    const dy = this.camera.target[1] - this.camera.eye[1];
+    const dz = this.camera.target[2] - this.camera.eye[2];
+    return Math.max(Math.hypot(dx, dy, dz), 1.0e-4);
+  }
+
+  private nextFrameSeed(): number {
+    const value = this.frameSeed;
+    this.frameSeed = this.frameSeed >= 2147483646 ? 1 : this.frameSeed + 1;
+    return value;
   }
 
   private renderFallbackFrame(): void {

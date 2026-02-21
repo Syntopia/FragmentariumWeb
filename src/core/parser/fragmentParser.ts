@@ -15,16 +15,256 @@ const PRESET_END = /^\s*#endpreset\s*$/i;
 const INCLUDE_DIRECTIVE = /^\s*#include\s+"([^"]+)"\s*$/i;
 const VERTEX_START = /^\s*#vertex\s*$/i;
 const VERTEX_END = /^\s*#endvertex\s*$/i;
+const PRESERVED_PREPROCESSOR_DIRECTIVES = new Set([
+  "define",
+  "undef",
+  "if",
+  "ifdef",
+  "ifndef",
+  "elif",
+  "else",
+  "endif",
+  "pragma",
+  "extension",
+  "line"
+]);
 
 interface ParsedUniform {
   definition: UniformDefinition;
   shaderLine: string;
 }
 
+interface GlobalUniformDependentInitializer {
+  declarationLine: string;
+  assignmentLines: string[];
+}
+
 const lockTypes = new Set(["locked", "notlocked", "notlockable", "alwayslocked"]);
+
+interface SyntheticUniformSpec {
+  name: string;
+  type: UniformType;
+  control: UniformControl;
+  group: string;
+  min: number[];
+  max: number[];
+  defaultValue: UniformValue;
+  tooltip: string;
+}
+
+const orbitTrapColorUniformSpecs: SyntheticUniformSpec[] = [
+  {
+    name: "BaseColor",
+    type: "vec3",
+    control: "color",
+    group: "Coloring",
+    min: [0, 0, 0],
+    max: [1, 1, 1],
+    defaultValue: [1, 1, 1],
+    tooltip: "Pure object color in white light."
+  },
+  {
+    name: "OrbitStrength",
+    type: "float",
+    control: "slider",
+    group: "Coloring",
+    min: [0],
+    max: [1],
+    defaultValue: 0,
+    tooltip: "Mix between base color and orbit-trap color."
+  },
+  {
+    name: "X",
+    type: "vec4",
+    control: "color",
+    group: "Coloring",
+    min: [0, 0, 0, -1],
+    max: [1, 1, 1, 1],
+    defaultValue: [0.5, 0.6, 0.6, 0.7],
+    tooltip: "Orbit trap color/weight for YZ-plane distance."
+  },
+  {
+    name: "Y",
+    type: "vec4",
+    control: "color",
+    group: "Coloring",
+    min: [0, 0, 0, -1],
+    max: [1, 1, 1, 1],
+    defaultValue: [1.0, 0.6, 0.0, 0.4],
+    tooltip: "Orbit trap color/weight for XZ-plane distance."
+  },
+  {
+    name: "Z",
+    type: "vec4",
+    control: "color",
+    group: "Coloring",
+    min: [0, 0, 0, -1],
+    max: [1, 1, 1, 1],
+    defaultValue: [0.8, 0.78, 1.0, 0.5],
+    tooltip: "Orbit trap color/weight for XY-plane distance."
+  },
+  {
+    name: "R",
+    type: "vec4",
+    control: "color",
+    group: "Coloring",
+    min: [0, 0, 0, -1],
+    max: [1, 1, 1, 1],
+    defaultValue: [0.4, 0.7, 1.0, 0.12],
+    tooltip: "Orbit trap color/weight for radial distance."
+  },
+  {
+    name: "CycleColors",
+    type: "bool",
+    control: "checkbox",
+    group: "Coloring",
+    min: [0],
+    max: [1],
+    defaultValue: false,
+    tooltip: "Enable cosine color cycling for orbit-trap channels."
+  },
+  {
+    name: "Cycles",
+    type: "float",
+    control: "slider",
+    group: "Coloring",
+    min: [0.1],
+    max: [32.3],
+    defaultValue: 1.1,
+    tooltip: "Cycle frequency when color cycling is enabled."
+  }
+];
 
 function toLines(source: string): string[] {
   return source.split(/\r\n|\r|\n/);
+}
+
+function isPreservedPreprocessorDirective(line: string): boolean {
+  const directive = line.match(/^\s*#\s*([A-Za-z_][A-Za-z0-9_]*)/);
+  if (directive === null) {
+    return false;
+  }
+  return PRESERVED_PREPROCESSOR_DIRECTIVES.has(directive[1].toLowerCase());
+}
+
+function braceDelta(line: string): number {
+  return (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length;
+}
+
+function gatherUniformNames(lines: string[]): Set<string> {
+  const names = new Set<string>();
+  for (const line of lines) {
+    const match = line.match(
+      /^\s*uniform\s+(?:float|int|bool|vec2|vec3|vec4|ivec2|ivec3|ivec4|uvec2|uvec3|uvec4|bvec2|bvec3|bvec4|mat2|mat3|mat4|mat2x2|mat2x3|mat2x4|mat3x2|mat3x3|mat3x4|mat4x2|mat4x3|mat4x4|uint|sampler2D|samplerCube)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;/
+    );
+    if (match !== null) {
+      names.add(match[1]);
+    }
+  }
+  return names;
+}
+
+function parseGlobalUniformDependentInitializer(
+  line: string,
+  uniformNames: Set<string>
+): GlobalUniformDependentInitializer | null {
+  const match = line.match(
+    /^(\s*)((?:highp|mediump|lowp)\s+)?(float|int|bool|vec2|vec3|vec4|ivec2|ivec3|ivec4|uvec2|uvec3|uvec4|bvec2|bvec3|bvec4|mat2|mat3|mat4|mat2x2|mat2x3|mat2x4|mat3x2|mat3x3|mat3x4|mat4x2|mat4x3|mat4x4|uint)\s+(.+);\s*$/
+  );
+  if (match === null) {
+    return null;
+  }
+
+  const indent = match[1];
+  const precision = match[2] ?? "";
+  const type = match[3];
+  const declaratorBody = match[4];
+  const declarators = splitTopLevelComma(declaratorBody).map((entry) => entry.trim());
+  if (declarators.length === 0) {
+    return null;
+  }
+
+  const parsedDeclarators = declarators.map((entry) => {
+    const declaratorMatch = entry.match(/^([A-Za-z_][A-Za-z0-9_]*)(?:\s*=\s*(.+))?$/);
+    if (declaratorMatch === null) {
+      return null;
+    }
+    return {
+      name: declaratorMatch[1],
+      initializer: declaratorMatch[2]?.trim() ?? null
+    };
+  });
+  if (parsedDeclarators.some((entry) => entry === null)) {
+    return null;
+  }
+
+  const variables = parsedDeclarators as Array<{ name: string; initializer: string | null }>;
+  const usesUniform = variables.some(
+    (entry) =>
+      entry.initializer !== null &&
+      [...uniformNames].some((uniformName) => new RegExp(`\\b${uniformName}\\b`).test(entry.initializer!))
+  );
+  if (!usesUniform) {
+    return null;
+  }
+
+  const declarationNames = variables.map((entry) => entry.name).join(", ");
+  const assignmentLines = variables
+    .filter((entry) => entry.initializer !== null)
+    .map((entry) => `${indent}${entry.name} = ${entry.initializer};`);
+
+  return {
+    declarationLine: `${indent}${precision}${type} ${declarationNames};`,
+    assignmentLines
+  };
+}
+
+function parseFallbackUniformShaderLine(line: string): string | null {
+  const match = line.match(/^(\s*uniform\s+[A-Za-z_][A-Za-z0-9_]*\s+[^;]+;)\s*.*$/);
+  if (match === null) {
+    return null;
+  }
+  return match[1].trimEnd();
+}
+
+function hasOrbitTrapDeclaration(source: string): boolean {
+  return /\bvec4\s+orbitTrap\b/.test(source);
+}
+
+function appendSyntheticOrbitTrapColorUniforms(
+  outputLines: string[],
+  uniforms: UniformDefinition[],
+  groups: Set<string>
+): void {
+  const existingUniformNames = gatherUniformNames(outputLines);
+  for (const uniform of uniforms) {
+    existingUniformNames.add(uniform.name);
+  }
+
+  let addedAny = false;
+  for (const spec of orbitTrapColorUniformSpecs) {
+    if (existingUniformNames.has(spec.name)) {
+      continue;
+    }
+    uniforms.push({
+      name: spec.name,
+      type: spec.type,
+      control: spec.control,
+      group: spec.group,
+      min: [...spec.min],
+      max: [...spec.max],
+      defaultValue: Array.isArray(spec.defaultValue) ? [...spec.defaultValue] : spec.defaultValue,
+      lockType: "notlocked",
+      tooltip: spec.tooltip
+    });
+    outputLines.push(`uniform ${spec.type} ${spec.name};`);
+    existingUniformNames.add(spec.name);
+    addedAny = true;
+  }
+
+  if (addedAny) {
+    groups.add("Coloring");
+  }
 }
 
 function parseLockType(raw: string | undefined): UniformDefinition["lockType"] {
@@ -39,7 +279,15 @@ function parseLockType(raw: string | undefined): UniformDefinition["lockType"] {
 }
 
 function parseNumber(raw: string): number {
-  const value = Number(raw.trim());
+  const trimmed = raw.trim();
+  const numericPrefix = trimmed.match(/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/);
+  if (numericPrefix !== null) {
+    const value = Number(numericPrefix[0]);
+    if (!Number.isNaN(value)) {
+      return value;
+    }
+  }
+  const value = Number(trimmed);
   if (Number.isNaN(value)) {
     throw new Error(`Unable to parse number: ${raw}`);
   }
@@ -116,7 +364,12 @@ function parsePresetBlock(name: string, lines: string[]): ParsedPreset {
     if (pair === null) {
       throw new Error(`Invalid preset line in '${name}': ${line}`);
     }
-    values[pair[1]] = parseUniformValue(pair[2]);
+    try {
+      values[pair[1]] = parseUniformValue(pair[2]);
+    } catch {
+      // Legacy presets may contain non-numeric values (e.g. texture paths) that are irrelevant
+      // for our current DE-only parser/runtime. Keep parsing and skip unsupported assignments.
+    }
   }
   return {
     name,
@@ -237,6 +490,10 @@ function parseAnnotatedUniform(
     throw new Error(`color[] only supports vec3/vec4 uniforms: ${line}`);
   }
 
+  if (trailing.startsWith("//")) {
+    return null;
+  }
+
   if (trailing === "") {
     return null;
   }
@@ -281,18 +538,21 @@ function expandIncludes(
 
 export function parseFragmentSource(options: ParserOptions): ParseResult {
   const expanded = expandIncludes(options.source, options.sourceName, options.includeMap, [options.sourceName]);
+  const lines = toLines(expanded);
+  const uniformNames = gatherUniformNames(lines);
 
   const outputLines: string[] = [];
   const uniforms: UniformDefinition[] = [];
   const presets: ParsedPreset[] = [];
   const groups = new Set<string>();
+  const globalInitAssignments: string[] = [];
 
   let cameraMode: "2D" | "3D" = "3D";
   let currentGroup = "Default";
   let inVertexBlock = false;
   let lastComment = "";
+  let shaderScopeDepth = 0;
 
-  const lines = toLines(expanded);
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     const trimmed = line.trim();
@@ -353,21 +613,66 @@ export function parseFragmentSource(options: ParserOptions): ParseResult {
     if (parsedUniform !== null) {
       uniforms.push(parsedUniform.definition);
       outputLines.push(parsedUniform.shaderLine);
+      shaderScopeDepth += braceDelta(parsedUniform.shaderLine);
+      lastComment = "";
+      continue;
+    }
+
+    const fallbackUniformShaderLine = parseFallbackUniformShaderLine(line);
+    if (fallbackUniformShaderLine !== null) {
+      outputLines.push(fallbackUniformShaderLine);
+      shaderScopeDepth += braceDelta(fallbackUniformShaderLine);
       lastComment = "";
       continue;
     }
 
     if (trimmed.startsWith("#")) {
+      if (isPreservedPreprocessorDirective(trimmed)) {
+        outputLines.push(line);
+        shaderScopeDepth += braceDelta(line);
+      }
       continue;
     }
 
+    if (shaderScopeDepth === 0) {
+      const transformed = parseGlobalUniformDependentInitializer(line, uniformNames);
+      if (transformed !== null) {
+        outputLines.push(transformed.declarationLine);
+        for (const assignmentLine of transformed.assignmentLines) {
+          globalInitAssignments.push(assignmentLine.trim());
+        }
+        shaderScopeDepth += braceDelta(transformed.declarationLine);
+        if (trimmed.startsWith("//")) {
+          lastComment = trimmed.replace(/^\/\//, "").trim();
+        } else {
+          lastComment = "";
+        }
+        continue;
+      }
+    }
+
     outputLines.push(line);
+    shaderScopeDepth += braceDelta(line);
 
     if (trimmed.startsWith("//")) {
       lastComment = trimmed.replace(/^\/\//, "").trim();
     } else {
       lastComment = "";
     }
+  }
+
+  if (hasOrbitTrapDeclaration(outputLines.join("\n"))) {
+    appendSyntheticOrbitTrapColorUniforms(outputLines, uniforms, groups);
+  }
+
+  if (globalInitAssignments.length > 0) {
+    outputLines.push("");
+    outputLines.push("#define HAS_FRAGMENTARIUM_WEB_INIT_GLOBALS 1");
+    outputLines.push("void fragmentariumWebInitGlobalsImpl() {");
+    for (const assignment of globalInitAssignments) {
+      outputLines.push(`  ${assignment}`);
+    }
+    outputLines.push("}");
   }
 
   groups.add("Default");

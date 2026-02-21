@@ -1,11 +1,98 @@
+import fragmentariumManifest from "./fragmentarium/manifest.json";
+
 export interface FractalSystemDefinition {
   id: string;
   name: string;
   category: string;
+  treePath?: string;
   source: string;
+  sourcePath?: string;
+  removedLegacyIncludes?: string[];
 }
 
-export const SYSTEM_INCLUDE_MAP: Record<string, string> = {
+interface FragmentariumManifestEntry {
+  id: string;
+  name: string;
+  path: string;
+  relativePath: string;
+  removedIncludes: string[];
+}
+
+const FRAGMENTARIUM_INCLUDE_PREFIX = "./fragmentarium/include/";
+const FRAGMENTARIUM_EXAMPLE_PREFIX = "./fragmentarium/examples/";
+
+const fragmentariumIncludeModules = import.meta.glob("./fragmentarium/include/*.frag", {
+  query: "?raw",
+  import: "default",
+  eager: true
+}) as Record<string, string>;
+
+const fragmentariumExampleModules = import.meta.glob("./fragmentarium/examples/**/*.frag", {
+  query: "?raw",
+  import: "default",
+  eager: true
+}) as Record<string, string>;
+
+const FRAGMENTARIUM_MANIFEST = fragmentariumManifest as FragmentariumManifestEntry[];
+
+function isLegacyPipelineSource(source: string): boolean {
+  return (
+    /\bvarying\b/.test(source) ||
+    /\battribute\b/.test(source) ||
+    /\bgl_FragColor\b/.test(source) ||
+    /\bgl_ProjectionMatrix\b/.test(source) ||
+    /\bvoid\s+main\s*\(/.test(source)
+  );
+}
+
+function buildFragmentariumIncludeMap(): Record<string, string> {
+  const includeMap: Record<string, string> = {};
+
+  for (const [modulePath, source] of Object.entries(fragmentariumIncludeModules)) {
+    if (!modulePath.startsWith(FRAGMENTARIUM_INCLUDE_PREFIX)) {
+      throw new Error(`Unexpected Fragmentarium include module path: ${modulePath}`);
+    }
+
+    const includeName = modulePath.slice(FRAGMENTARIUM_INCLUDE_PREFIX.length);
+    if (includeName.length === 0 || includeName.includes("/")) {
+      throw new Error(`Invalid Fragmentarium include name from module path: ${modulePath}`);
+    }
+
+    includeMap[includeName] = source;
+  }
+
+  return includeMap;
+}
+
+function buildFragmentariumSystems(): FractalSystemDefinition[] {
+  return FRAGMENTARIUM_MANIFEST.flatMap((entry) => {
+    const modulePath = `${FRAGMENTARIUM_EXAMPLE_PREFIX}${entry.relativePath}`;
+    const source = fragmentariumExampleModules[modulePath];
+    if (source === undefined) {
+      throw new Error(`Missing Fragmentarium source module for manifest path: ${entry.relativePath}`);
+    }
+
+    if (isLegacyPipelineSource(source)) {
+      return [];
+    }
+
+    return [{
+      id: entry.id,
+      name: entry.name,
+      category: "Fragmentarium",
+      treePath: `Fragmentarium/${entry.path}`,
+      source,
+      sourcePath: `fragmentarium/examples/${entry.relativePath}`,
+      removedLegacyIncludes: [...entry.removedIncludes]
+    }];
+  }).sort((a, b) => {
+    const aPath = a.treePath ?? a.name;
+    const bPath = b.treePath ?? b.name;
+    return aPath.localeCompare(bPath);
+  });
+}
+
+const BUILTIN_INCLUDE_MAP: Record<string, string> = {
   "common-camera-3d.frag": `
 #camera 3D
 #group Camera
@@ -271,25 +358,27 @@ PaletteShift = 2.8
 #endpreset
 `;
 
-export const FRACTAL_SYSTEMS: FractalSystemDefinition[] = [
-  {
-    id: "box-csg",
-    name: "Box CSG",
-    category: "Simple Systems",
-    source: boxCsgSystem
-  },
-  {
-    id: "box-grid",
-    name: "Box Grid",
-    category: "Simple Systems",
-    source: boxGridSystem
-  },
+const BUILTIN_SYSTEMS: FractalSystemDefinition[] = [
   {
     id: "mandelbulb",
     name: "Mandelbulb",
-    category: "Fractals",
+    category: "Built-in",
+    treePath: "Built-in/Fractals/Mandelbulb",
     source: mandelbulbSystem
   }
+];
+
+const FRAGMENTARIUM_INCLUDE_MAP = buildFragmentariumIncludeMap();
+const FRAGMENTARIUM_SYSTEMS = buildFragmentariumSystems();
+
+export const SYSTEM_INCLUDE_MAP: Record<string, string> = {
+  ...BUILTIN_INCLUDE_MAP,
+  ...FRAGMENTARIUM_INCLUDE_MAP
+};
+
+export const FRACTAL_SYSTEMS: FractalSystemDefinition[] = [
+  ...BUILTIN_SYSTEMS,
+  ...FRAGMENTARIUM_SYSTEMS
 ];
 
 export function getSystemById(id: string): FractalSystemDefinition {

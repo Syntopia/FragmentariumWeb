@@ -1,0 +1,637 @@
+[
+  {
+    "id": "fragmentarium/experimental/knot",
+    "name": "Knot",
+    "path": "Experimental/Knot",
+    "relativePath": "Experimental/Knot.frag",
+    "removedIncludes": [
+      "Sky-Pathtracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/lifteddomaincoloring3d",
+    "name": "LiftedDomainColoring3D",
+    "path": "Experimental/LiftedDomainColoring3D",
+    "relativePath": "Experimental/LiftedDomainColoring3D.frag",
+    "removedIncludes": [
+      "Soft-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/mixed",
+    "name": "Mixed",
+    "path": "Experimental/Mixed",
+    "relativePath": "Experimental/Mixed.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/mobius",
+    "name": "Mobius",
+    "path": "Experimental/Mobius",
+    "relativePath": "Experimental/Mobius.frag",
+    "removedIncludes": [
+      "Soft-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/noise",
+    "name": "Noise",
+    "path": "Experimental/Noise",
+    "relativePath": "Experimental/Noise.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/octahedronot",
+    "name": "OctahedronOT",
+    "path": "Experimental/OctahedronOT",
+    "relativePath": "Experimental/OctahedronOT.frag",
+    "removedIncludes": [
+      "Fast-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/pseudokleinian-progressive-dof",
+    "name": "PseudoKleinian-Progressive-DOF",
+    "path": "Experimental/PseudoKleinian-Progressive-DOF",
+    "relativePath": "Experimental/PseudoKleinian-Progressive-DOF.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/quaternionmandelbrot4d",
+    "name": "QuaternionMandelbrot4D",
+    "path": "Experimental/QuaternionMandelbrot4D",
+    "relativePath": "Experimental/QuaternionMandelbrot4D.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/raytracingtestfrag",
+    "name": "Raytracingtestfrag",
+    "path": "Experimental/Raytracingtestfrag",
+    "relativePath": "Experimental/Raytracingtestfrag.frag",
+    "removedIncludes": [
+      "Sky-Pathtracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/spheresponge",
+    "name": "SphereSponge",
+    "path": "Experimental/SphereSponge",
+    "relativePath": "Experimental/SphereSponge.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/spudsville2",
+    "name": "Spudsville2",
+    "path": "Experimental/Spudsville2",
+    "relativePath": "Experimental/Spudsville2.frag",
+    "removedIncludes": [
+      "Soft-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/stereographic4djulia",
+    "name": "Stereographic4DJulia",
+    "path": "Experimental/Stereographic4DJulia",
+    "relativePath": "Experimental/Stereographic4DJulia.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/stereographicquaternionjulia",
+    "name": "StereographicQuaternionJulia",
+    "path": "Experimental/StereographicQuaternionJulia",
+    "relativePath": "Experimental/StereographicQuaternionJulia.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/terrain",
+    "name": "Terrain",
+    "path": "Experimental/Terrain",
+    "relativePath": "Experimental/Terrain.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/tetrahedron-alternative",
+    "name": "Tetrahedron-Alternative",
+    "path": "Experimental/Tetrahedron-Alternative",
+    "relativePath": "Experimental/Tetrahedron-Alternative.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/experimental/triplanartexturing",
+    "name": "TriPlanarTexturing",
+    "path": "Experimental/TriPlanarTexturing",
+    "relativePath": "Experimental/TriPlanarTexturing.frag",
+    "removedIncludes": [
+      "Soft-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/historical-3d-fractals/mandelbox",
+    "name": "Mandelbox",
+    "path": "Historical 3D Fractals/Mandelbox",
+    "relativePath": "Historical 3D Fractals/Mandelbox.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/historical-3d-fractals/mandelbulb",
+    "name": "Mandelbulb",
+    "path": "Historical 3D Fractals/Mandelbulb",
+    "relativePath": "Historical 3D Fractals/Mandelbulb.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/historical-3d-fractals/quaternionjulia",
+    "name": "QuaternionJulia",
+    "path": "Historical 3D Fractals/QuaternionJulia",
+    "relativePath": "Historical 3D Fractals/QuaternionJulia.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/kaleidoscopic-ifs/dodecahedron",
+    "name": "Dodecahedron",
+    "path": "Kaleidoscopic IFS/Dodecahedron",
+    "relativePath": "Kaleidoscopic IFS/Dodecahedron.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/kaleidoscopic-ifs/icosahedron",
+    "name": "Icosahedron",
+    "path": "Kaleidoscopic IFS/Icosahedron",
+    "relativePath": "Kaleidoscopic IFS/Icosahedron.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/kaleidoscopic-ifs/menger",
+    "name": "Menger",
+    "path": "Kaleidoscopic IFS/Menger",
+    "relativePath": "Kaleidoscopic IFS/Menger.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/kaleidoscopic-ifs/newmenger",
+    "name": "NewMenger",
+    "path": "Kaleidoscopic IFS/NewMenger",
+    "relativePath": "Kaleidoscopic IFS/NewMenger.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/kaleidoscopic-ifs/octahedron",
+    "name": "Octahedron",
+    "path": "Kaleidoscopic IFS/Octahedron",
+    "relativePath": "Kaleidoscopic IFS/Octahedron.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/kaleidoscopic-ifs/tetrahedron",
+    "name": "Tetrahedron",
+    "path": "Kaleidoscopic IFS/Tetrahedron",
+    "relativePath": "Kaleidoscopic IFS/Tetrahedron.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/kali-s-creations/kalibox",
+    "name": "Kalibox",
+    "path": "Kali's Creations/Kalibox",
+    "relativePath": "Kali's Creations/Kalibox.frag",
+    "removedIncludes": [
+      "DE-Raytracer-v0.9.1.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/kali-s-creations/livingkifs",
+    "name": "LivingKIFS",
+    "path": "Kali's Creations/LivingKIFS",
+    "relativePath": "Kali's Creations/LivingKIFS.frag",
+    "removedIncludes": [
+      "DE-Raytracer-v0.9.1.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/kali-s-creations/treebroccoli",
+    "name": "Treebroccoli",
+    "path": "Kali's Creations/Treebroccoli",
+    "relativePath": "Kali's Creations/Treebroccoli.frag",
+    "removedIncludes": []
+  },
+  {
+    "id": "fragmentarium/kali-s-creations/xray-skifs",
+    "name": "Xray_skifs",
+    "path": "Kali's Creations/Xray_skifs",
+    "relativePath": "Kali's Creations/Xray_skifs.frag",
+    "removedIncludes": []
+  },
+  {
+    "id": "fragmentarium/knighty-collection/algebraic07",
+    "name": "algebraic07",
+    "path": "Knighty Collection/algebraic07",
+    "relativePath": "Knighty Collection/algebraic07.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/doyle-spirals",
+    "name": "Doyle-Spirals",
+    "path": "Knighty Collection/Doyle-Spirals",
+    "relativePath": "Knighty Collection/Doyle-Spirals.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/fold-and-cut-polyhedra-original",
+    "name": "Fold and Cut Polyhedra - Original",
+    "path": "Knighty Collection/Fold and Cut Polyhedra - Original",
+    "relativePath": "Knighty Collection/Fold and Cut Polyhedra - Original.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/fold-and-cut-polyhedra-examples/icosahedral-polyhedra02",
+    "name": "Icosahedral_polyhedra02",
+    "path": "Knighty Collection/Fold_and_cut_polyhedra_examples/Icosahedral_polyhedra02",
+    "relativePath": "Knighty Collection/Fold_and_cut_polyhedra_examples/Icosahedral_polyhedra02.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/fold-and-cut-polyhedra-examples/icosahedral-polyhedra-iterated-10",
+    "name": "Icosahedral_polyhedra_iterated_10",
+    "path": "Knighty Collection/Fold_and_cut_polyhedra_examples/Icosahedral_polyhedra_iterated_10",
+    "relativePath": "Knighty Collection/Fold_and_cut_polyhedra_examples/Icosahedral_polyhedra_iterated_10.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/fold-and-cut-polyhedra-examples/icosahedral-polyhedra-iterated-11",
+    "name": "Icosahedral_polyhedra_iterated_11",
+    "path": "Knighty Collection/Fold_and_cut_polyhedra_examples/Icosahedral_polyhedra_iterated_11",
+    "relativePath": "Knighty Collection/Fold_and_cut_polyhedra_examples/Icosahedral_polyhedra_iterated_11.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/fold-and-cut-polyhedra-examples/icosahedral-polyhedra-iterated-20",
+    "name": "Icosahedral_polyhedra_iterated_20",
+    "path": "Knighty Collection/Fold_and_cut_polyhedra_examples/Icosahedral_polyhedra_iterated_20",
+    "relativePath": "Knighty Collection/Fold_and_cut_polyhedra_examples/Icosahedral_polyhedra_iterated_20.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/fold-and-cut-polyhedra-examples/menger-iterated-20",
+    "name": "menger_iterated_20",
+    "path": "Knighty Collection/Fold_and_cut_polyhedra_examples/menger_iterated_20",
+    "relativePath": "Knighty Collection/Fold_and_cut_polyhedra_examples/menger_iterated_20.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/fold-and-cut-polyhedra-examples/octahedral-polyhedra02",
+    "name": "octahedral_polyhedra02",
+    "path": "Knighty Collection/Fold_and_cut_polyhedra_examples/octahedral_polyhedra02",
+    "relativePath": "Knighty Collection/Fold_and_cut_polyhedra_examples/octahedral_polyhedra02.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/hyperbolic-tesselation-2din3d-colored-02",
+    "name": "hyperbolic-tesselation-2Din3D-colored-02",
+    "path": "Knighty Collection/hyperbolic-tesselation-2Din3D-colored-02",
+    "relativePath": "Knighty Collection/hyperbolic-tesselation-2Din3D-colored-02.frag",
+    "removedIncludes": [
+      "DE-Raytracer-v0.9.1.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/hyperbolic-tesselations-named/hyperbolic-tesselation-3-5-3-colored-named-00",
+    "name": "hyperbolic-tesselation-3-5-3-colored-named-00",
+    "path": "Knighty Collection/Hyperbolic-tesselations-named/hyperbolic-tesselation-3-5-3-colored-named-00",
+    "relativePath": "Knighty Collection/Hyperbolic-tesselations-named/hyperbolic-tesselation-3-5-3-colored-named-00.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/hyperbolic-tesselations-named/hyperbolic-tesselation-5-3-n-colored-named-00",
+    "name": "hyperbolic-tesselation-5-3-n-colored-named-00",
+    "path": "Knighty Collection/Hyperbolic-tesselations-named/hyperbolic-tesselation-5-3-n-colored-named-00",
+    "relativePath": "Knighty Collection/Hyperbolic-tesselations-named/hyperbolic-tesselation-5-3-n-colored-named-00.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/hyperbolic-tesselations-named/hyperbolic-tesselation-bifurcating-5-3-3-colored-named-00",
+    "name": "hyperbolic-tesselation-bifurcating-5-3-3-colored-named-00",
+    "path": "Knighty Collection/Hyperbolic-tesselations-named/hyperbolic-tesselation-bifurcating-5-3-3-colored-named-00",
+    "relativePath": "Knighty Collection/Hyperbolic-tesselations-named/hyperbolic-tesselation-bifurcating-5-3-3-colored-named-00.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/hyperbolic-tesselations-named/hyperbolic-tesselation-cyclic-m-3-n-3-colored-named-00",
+    "name": "hyperbolic-tesselation-cyclic-m-3-n-3-colored-named-00",
+    "path": "Knighty Collection/Hyperbolic-tesselations-named/hyperbolic-tesselation-cyclic-m-3-n-3-colored-named-00",
+    "relativePath": "Knighty Collection/Hyperbolic-tesselations-named/hyperbolic-tesselation-cyclic-m-3-n-3-colored-named-00.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/icosahedral-polyhedra-iterated-11",
+    "name": "Icosahedral_polyhedra_iterated_11",
+    "path": "Knighty Collection/Icosahedral_polyhedra_iterated_11",
+    "relativePath": "Knighty Collection/Icosahedral_polyhedra_iterated_11.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/icosahedral-polyhedra-iterated-20",
+    "name": "Icosahedral_polyhedra_iterated_20",
+    "path": "Knighty Collection/Icosahedral_polyhedra_iterated_20",
+    "relativePath": "Knighty Collection/Icosahedral_polyhedra_iterated_20.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/knot",
+    "name": "Knot",
+    "path": "Knighty Collection/Knot",
+    "relativePath": "Knighty Collection/Knot.frag",
+    "removedIncludes": [
+      "Soft-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/koch01",
+    "name": "Koch01",
+    "path": "Knighty Collection/Koch01",
+    "relativePath": "Knighty Collection/Koch01.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/mandalabeth-generic-with-jacobian/mandalabeth-m3-jacobian",
+    "name": "Mandalabeth-M3-jacobian",
+    "path": "Knighty Collection/Mandalabeth-generic-with-jacobian/Mandalabeth-M3-jacobian",
+    "relativePath": "Knighty Collection/Mandalabeth-generic-with-jacobian/Mandalabeth-M3-jacobian.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/mandalabeth-generic-with-jacobian/mandalabeth-m4-jacobian",
+    "name": "Mandalabeth-M4-jacobian",
+    "path": "Knighty Collection/Mandalabeth-generic-with-jacobian/Mandalabeth-M4-jacobian",
+    "relativePath": "Knighty Collection/Mandalabeth-generic-with-jacobian/Mandalabeth-M4-jacobian.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/mandalabeth-generic-with-jacobian/mandalabeth-m5-jacobian",
+    "name": "Mandalabeth-M5-jacobian",
+    "path": "Knighty Collection/Mandalabeth-generic-with-jacobian/Mandalabeth-M5-jacobian",
+    "relativePath": "Knighty Collection/Mandalabeth-generic-with-jacobian/Mandalabeth-M5-jacobian.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/mandelbrotheightfield",
+    "name": "MandelbrotHeightfield",
+    "path": "Knighty Collection/MandelbrotHeightfield",
+    "relativePath": "Knighty Collection/MandelbrotHeightfield.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/mdifs",
+    "name": "mdifs",
+    "path": "Knighty Collection/mdifs",
+    "relativePath": "Knighty Collection/mdifs.frag",
+    "removedIncludes": [
+      "Soft-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/menger-iterated-20",
+    "name": "Menger_iterated_20",
+    "path": "Knighty Collection/Menger_iterated_20",
+    "relativePath": "Knighty Collection/Menger_iterated_20.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/newtonheightfield",
+    "name": "NewtonHeightfield",
+    "path": "Knighty Collection/NewtonHeightfield",
+    "relativePath": "Knighty Collection/NewtonHeightfield.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/polychora-special",
+    "name": "polychora-special",
+    "path": "Knighty Collection/polychora-special",
+    "relativePath": "Knighty Collection/polychora-special.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/polychora-special02",
+    "name": "polychora-special02",
+    "path": "Knighty Collection/polychora-special02",
+    "relativePath": "Knighty Collection/polychora-special02.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/polychora03",
+    "name": "polychora03",
+    "path": "Knighty Collection/polychora03",
+    "relativePath": "Knighty Collection/polychora03.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/polychora06",
+    "name": "polychora06",
+    "path": "Knighty Collection/polychora06",
+    "relativePath": "Knighty Collection/polychora06.frag",
+    "removedIncludes": [
+      "Soft-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/pseudokleinian",
+    "name": "PseudoKleinian",
+    "path": "Knighty Collection/PseudoKleinian",
+    "relativePath": "Knighty Collection/PseudoKleinian.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/pseudokleinianmenger",
+    "name": "PseudoKleinianMenger",
+    "path": "Knighty Collection/PseudoKleinianMenger",
+    "relativePath": "Knighty Collection/PseudoKleinianMenger.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/quadray/quadray01-07",
+    "name": "quadray01-07",
+    "path": "Knighty Collection/Quadray/quadray01-07",
+    "relativePath": "Knighty Collection/Quadray/quadray01-07.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/quadray/quadray01-jacobian-02",
+    "name": "quadray01-jacobian-02",
+    "path": "Knighty Collection/Quadray/quadray01-jacobian-02",
+    "relativePath": "Knighty Collection/Quadray/quadray01-jacobian-02.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/knighty-collection/quadray/quadray04-03forv0-8",
+    "name": "quadray04-03forV0.8",
+    "path": "Knighty Collection/Quadray/quadray04-03forV0.8",
+    "relativePath": "Knighty Collection/Quadray/quadray04-03forV0.8.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/theory/mandelbox-dual-numbers-de-slicer",
+    "name": "Mandelbox - Dual Numbers DE - Slicer",
+    "path": "Theory/Mandelbox - Dual Numbers DE - Slicer",
+    "relativePath": "Theory/Mandelbox - Dual Numbers DE - Slicer.frag",
+    "removedIncludes": [
+      "DE-Raytracer-Slicer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/theory/mandelbox-dual-numbers-de",
+    "name": "Mandelbox - Dual Numbers DE",
+    "path": "Theory/Mandelbox - Dual Numbers DE",
+    "relativePath": "Theory/Mandelbox - Dual Numbers DE.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/theory/mandelbulb-slicer",
+    "name": "Mandelbulb-Slicer",
+    "path": "Theory/Mandelbulb-Slicer",
+    "relativePath": "Theory/Mandelbulb-Slicer.frag",
+    "removedIncludes": [
+      "DE-Raytracer-Slicer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/tutorials/10-simple-distance-estimated-3d-system",
+    "name": "10 - Simple Distance Estimated 3D system",
+    "path": "Tutorials/10 - Simple Distance Estimated 3D system",
+    "relativePath": "Tutorials/10 - Simple Distance Estimated 3D system.frag",
+    "removedIncludes": [
+      "Soft-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/tutorials/11-simple-distance-estimated-3d-fractal",
+    "name": "11 - Simple Distance Estimated 3D fractal",
+    "path": "Tutorials/11 - Simple Distance Estimated 3D fractal",
+    "relativePath": "Tutorials/11 - Simple Distance Estimated 3D fractal.frag",
+    "removedIncludes": [
+      "DE-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/tutorials/12-faster-raytracing-of-3d-fractals",
+    "name": "12 - Faster raytracing of 3D fractals",
+    "path": "Tutorials/12 - Faster raytracing of 3D fractals",
+    "relativePath": "Tutorials/12 - Faster raytracing of 3D fractals.frag",
+    "removedIncludes": [
+      "Fast-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/tutorials/22-progressive-3d-rendering",
+    "name": "22 - Progressive 3D Rendering",
+    "path": "Tutorials/22 - Progressive 3D Rendering",
+    "relativePath": "Tutorials/22 - Progressive 3D Rendering.frag",
+    "removedIncludes": [
+      "Soft-Raytracer.frag"
+    ]
+  },
+  {
+    "id": "fragmentarium/tutorials/25-image-based-lighting",
+    "name": "25 - Image Based Lighting",
+    "path": "Tutorials/25 - Image Based Lighting",
+    "relativePath": "Tutorials/25 - Image Based Lighting.frag",
+    "removedIncludes": [
+      "IBL-Raytracer.frag"
+    ]
+  }
+]

@@ -5,6 +5,10 @@ export interface SceneShaderBuildOptions {
   integrator: IntegratorDefinition;
 }
 
+export interface FocusProbeShaderBuildOptions {
+  geometrySource: string;
+}
+
 export interface SceneShaderSources {
   vertexSource: string;
   fragmentSource: string;
@@ -14,6 +18,30 @@ export interface DisplayShaderSources {
   vertexSource: string;
   fragmentSource: string;
 }
+
+const sceneMathPrelude = `
+#ifndef PI
+#define PI 3.14159265358979323846264
+#endif
+#ifndef TWO_PI
+#define TWO_PI (2.0 * PI)
+#endif
+#ifndef HALF_PI
+#define HALF_PI (0.5 * PI)
+#endif
+`;
+
+const sceneMathPostlude = `
+#ifdef HALF_PI
+#undef HALF_PI
+#endif
+#ifdef TWO_PI
+#undef TWO_PI
+#endif
+#ifdef PI
+#undef PI
+#endif
+`;
 
 const fullScreenTriangleVertexShader = `#version 300 es
 precision highp float;
@@ -100,14 +128,202 @@ function hasDistanceEstimator(source: string): boolean {
   return /\bfloat\s+DE\s*\(/.test(source);
 }
 
+function hasInitFunctionDefinition(source: string): boolean {
+  return /\bvoid\s+init\s*\(\s*\)\s*\{/.test(source);
+}
+
+function hasOrbitTrapDeclaration(source: string): boolean {
+  return /\bvec4\s+orbitTrap\b/.test(source);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasUniformDeclaration(source: string, uniformName: string): boolean {
+  const escapedName = escapeRegExp(uniformName);
+  return new RegExp(`\\buniform\\s+[A-Za-z_][A-Za-z0-9_]*\\s+${escapedName}\\b`).test(source);
+}
+
+function buildCameraApertureResolver(hasApertureUniform: boolean): string {
+  if (hasApertureUniform) {
+    return `
+float fragmentariumWebCameraAperture() {
+  return max(Aperture, 0.0);
+}
+`;
+  }
+
+  return `
+float fragmentariumWebCameraAperture() {
+  return max(uLensAperture, 0.0);
+}
+`;
+}
+
+function buildCameraFocalDistanceResolver(hasFocalPlaneUniform: boolean): string {
+  if (hasFocalPlaneUniform) {
+    return `
+float fragmentariumWebCameraFocalDistance() {
+  return max(FocalPlane, 1.0e-4);
+}
+`;
+  }
+
+  return `
+float fragmentariumWebCameraFocalDistance() {
+  return max(uLensFocalDistance, 1.0e-4);
+}
+`;
+}
+
+const orbitTrapColorUniformSpecs: Array<{ name: string; type: string }> = [
+  { name: "BaseColor", type: "vec3" },
+  { name: "OrbitStrength", type: "float" },
+  { name: "X", type: "vec4" },
+  { name: "Y", type: "vec4" },
+  { name: "Z", type: "vec4" },
+  { name: "R", type: "vec4" },
+  { name: "CycleColors", type: "bool" },
+  { name: "Cycles", type: "float" }
+];
+
+function buildOrbitTrapColorUniformDeclarations(source: string): string {
+  const declarations = orbitTrapColorUniformSpecs
+    .filter((spec) => !hasUniformDeclaration(source, spec.name))
+    .map((spec) => `uniform ${spec.type} ${spec.name};`);
+
+  if (declarations.length === 0) {
+    return "";
+  }
+
+  return `\n${declarations.join("\n")}\n`;
+}
+
+function buildFragmentariumBridge(options: { hasOrbitTrap: boolean; hasBaseColor: boolean }): string {
+  if (!options.hasOrbitTrap) {
+    return `
+float fragmentariumWebDETrace(vec3 p) {
+  return DE(p);
+}
+
+float fragmentariumWebDESample(vec3 p) {
+  return DE(p);
+}
+
+float fragmentariumWebOrbitTrapValue(float falloff) {
+  return 0.0;
+}
+
+vec3 fragmentariumResolveBaseColor(vec3 p, vec3 n) {
+  return baseColor(p, n);
+}
+`;
+  }
+
+  const orbitTrapColoring = options.hasBaseColor
+    ? ""
+    : `
+vec3 fragmentariumWebCycleColor(vec3 c, float s) {
+  return vec3(0.5) + 0.5 * vec3(
+    cos(s * Cycles + c.x),
+    cos(s * Cycles + c.y),
+    cos(s * Cycles + c.z)
+  );
+}
+
+vec3 fragmentariumWebOrbitTrapBaseColor() {
+  vec4 trap = fragmentariumWebCapturedOrbitTrap;
+  trap.w = sqrt(max(trap.w, 0.0));
+
+  vec3 orbitColor;
+  if (CycleColors) {
+    orbitColor =
+      fragmentariumWebCycleColor(X.xyz, trap.x) * X.w * trap.x +
+      fragmentariumWebCycleColor(Y.xyz, trap.y) * Y.w * trap.y +
+      fragmentariumWebCycleColor(Z.xyz, trap.z) * Z.w * trap.z +
+      fragmentariumWebCycleColor(R.xyz, trap.w) * R.w * trap.w;
+  } else {
+    orbitColor =
+      X.xyz * X.w * trap.x +
+      Y.xyz * Y.w * trap.y +
+      Z.xyz * Z.w * trap.z +
+      R.xyz * R.w * trap.w;
+  }
+
+  return mix(BaseColor, 3.0 * orbitColor, clamp(OrbitStrength, 0.0, 1.0));
+}
+`;
+
+  const resolveColorCall = options.hasBaseColor
+    ? "  return baseColor(p, n);"
+    : "  return fragmentariumWebOrbitTrapBaseColor();";
+
+  return `
+vec4 fragmentariumWebCapturedOrbitTrap = vec4(10000.0);
+
+void fragmentariumWebResetOrbitTrap() {
+  orbitTrap = vec4(10000.0);
+}
+
+float fragmentariumWebDETrace(vec3 p) {
+  fragmentariumWebResetOrbitTrap();
+  float d = DE(p);
+  fragmentariumWebCapturedOrbitTrap = orbitTrap;
+  return d;
+}
+
+float fragmentariumWebDESample(vec3 p) {
+  vec4 savedTrap = fragmentariumWebCapturedOrbitTrap;
+  fragmentariumWebResetOrbitTrap();
+  float d = DE(p);
+  orbitTrap = savedTrap;
+  fragmentariumWebCapturedOrbitTrap = savedTrap;
+  return d;
+}
+
+float fragmentariumWebOrbitTrapValue(float falloff) {
+  vec4 trap = abs(fragmentariumWebCapturedOrbitTrap);
+  float trapRadius = sqrt(max(trap.w, 0.0));
+  float trapMin = min(min(trap.x, trap.y), min(trap.z, trapRadius));
+  float k = max(falloff, 1.0e-4);
+  return clamp(exp(-trapMin * k), 0.0, 1.0);
+}
+
+void fragmentariumWebRestoreCapturedOrbitTrap() {
+  orbitTrap = fragmentariumWebCapturedOrbitTrap;
+}
+${orbitTrapColoring}
+vec3 fragmentariumResolveBaseColor(vec3 p, vec3 n) {
+  fragmentariumWebRestoreCapturedOrbitTrap();
+${resolveColorCall}
+}
+`;
+}
+
 export function buildSceneShaderSources(options: SceneShaderBuildOptions): SceneShaderSources {
   if (!hasDistanceEstimator(options.geometrySource)) {
     throw new Error("Geometry source must define a DE(vec3) function.");
   }
 
-  const fallbackBaseColor = hasBaseColorFunction(options.geometrySource)
+  const hasBaseColor = hasBaseColorFunction(options.geometrySource);
+  const hasOrbitTrap = hasOrbitTrapDeclaration(options.geometrySource);
+  const hasApertureUniform = hasUniformDeclaration(options.geometrySource, "Aperture");
+  const hasFocalPlaneUniform = hasUniformDeclaration(options.geometrySource, "FocalPlane");
+
+  const fallbackBaseColor = hasBaseColor
     ? ""
     : `\nvec3 baseColor(vec3 p, vec3 n) {\n  return vec3(0.85, 0.9, 1.0);\n}\n`;
+  const orbitTrapColorUniformDeclarations = hasOrbitTrap
+    ? buildOrbitTrapColorUniformDeclarations(options.geometrySource)
+    : "";
+  const hasInit = hasInitFunctionDefinition(options.geometrySource);
+  const initInvocation = hasInit
+    ? "  // Legacy Fragmentarium systems often require init() to update globals from uniforms.\n  init();\n"
+    : "";
+  const fragmentariumBridge = buildFragmentariumBridge({ hasOrbitTrap, hasBaseColor });
+  const apertureResolver = buildCameraApertureResolver(hasApertureUniform);
+  const focalDistanceResolver = buildCameraFocalDistanceResolver(hasFocalPlaneUniform);
 
   const fragmentSource = `#version 300 es
 precision highp float;
@@ -118,6 +334,7 @@ out vec4 fragColor;
 uniform vec2 uResolution;
 uniform float uTime;
 uniform int uSubframe;
+uniform int uFrameIndex;
 uniform sampler2D uBackbuffer;
 uniform bool uUseBackbuffer;
 
@@ -125,10 +342,24 @@ uniform vec3 uEye;
 uniform vec3 uTarget;
 uniform vec3 uUp;
 uniform float uFov;
+uniform float uLensAperture;
+uniform float uLensFocalDistance;
+uniform float uAAStrength;
 
+float DE(vec3 p);
+vec3 baseColor(vec3 p, vec3 n);
+
+${sceneMathPrelude}
 ${options.geometrySource}
 ${fallbackBaseColor}
+${orbitTrapColorUniformDeclarations}
+${sceneMathPostlude}
+${fragmentariumBridge}
 ${options.integrator.glsl}
+
+#ifndef HAS_FRAGMENTARIUM_WEB_INIT_GLOBALS
+void fragmentariumWebInitGlobalsImpl() {}
+#endif
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -136,28 +367,60 @@ float hash12(vec2 p) {
   return fract((p3.x + p3.y) * p3.z);
 }
 
-vec3 cameraRay(vec2 fragCoord) {
+vec2 fragmentariumWebSampleDisk(vec2 p) {
+  float u1 = hash12(p + 11.17);
+  float u2 = hash12(p + 47.31);
+  float r = sqrt(u1);
+  float theta = 6.283185307179586 * u2;
+  return vec2(cos(theta), sin(theta)) * r;
+}
+${apertureResolver}
+${focalDistanceResolver}
+void cameraRay(vec2 fragCoord, out vec3 rayOrigin, out vec3 rayDir) {
   vec2 uv = fragCoord / uResolution;
   uv = uv * 2.0 - 1.0;
   uv.x *= uResolution.x / max(uResolution.y, 1.0);
 
-  vec2 jitter = vec2(0.0);
-  if (uSubframe > 0) {
-    jitter = vec2(hash12(fragCoord + float(uSubframe)), hash12(fragCoord + 17.0 + float(uSubframe))) - 0.5;
-    jitter /= uResolution;
-  }
+  float frameSeed = float(uFrameIndex);
+  vec2 jitter =
+    (vec2(
+      hash12(fragCoord + vec2(3.0, 19.0) + vec2(frameSeed * 0.6180339, frameSeed * 0.4142135) + float(uSubframe)),
+      hash12(fragCoord + vec2(47.0, 7.0) + vec2(frameSeed * 0.1415927, frameSeed * 0.7320508) + float(uSubframe))
+    ) - 0.5) *
+    clamp(uAAStrength, 0.0, 2.0);
+  jitter /= max(uResolution, vec2(1.0));
 
-  vec3 dir = normalize(uTarget - uEye);
+  vec3 viewDirRaw = uTarget - uEye;
+  vec3 dir = normalize(length(viewDirRaw) > 1.0e-6 ? viewDirRaw : vec3(0.0, 0.0, 1.0));
   vec3 upOrtho = normalize(uUp - dot(uUp, dir) * dir);
   vec3 right = normalize(cross(dir, upOrtho));
 
   vec2 cameraCoord = (uv + jitter) * uFov;
-  return normalize(dir + right * cameraCoord.x + upOrtho * cameraCoord.y);
+  vec3 pinholeDir = normalize(dir + right * cameraCoord.x + upOrtho * cameraCoord.y);
+
+  float aperture = fragmentariumWebCameraAperture();
+  float focalDistance = fragmentariumWebCameraFocalDistance();
+  if (aperture > 1.0e-6) {
+    vec2 lens = fragmentariumWebSampleDisk(
+      fragCoord + vec2(71.13, 29.47) * (float(uSubframe + 1) + frameSeed * 0.5)
+    ) * aperture;
+    vec3 lensOffset = right * lens.x + upOrtho * lens.y;
+    vec3 focusPoint = uEye + pinholeDir * focalDistance;
+    rayOrigin = uEye + lensOffset;
+    rayDir = normalize(focusPoint - rayOrigin);
+    return;
+  }
+
+  rayOrigin = uEye;
+  rayDir = pinholeDir;
 }
 
 void main() {
-  vec3 rayDir = cameraRay(gl_FragCoord.xy);
-  vec3 sampleColor = renderColor(uEye, rayDir);
+  fragmentariumWebInitGlobalsImpl();
+${initInvocation}  vec3 rayOrigin;
+  vec3 rayDir;
+  cameraRay(gl_FragCoord.xy, rayOrigin, rayDir);
+  vec3 sampleColor = renderColor(rayOrigin, rayDir);
 
   if (uUseBackbuffer) {
     vec4 prev = texelFetch(uBackbuffer, ivec2(gl_FragCoord.xy), 0);
@@ -165,6 +428,112 @@ void main() {
   } else {
     fragColor = vec4(sampleColor, 1.0);
   }
+}
+`;
+
+  return {
+    vertexSource: fullScreenTriangleVertexShader,
+    fragmentSource
+  };
+}
+
+export function buildFocusProbeShaderSources(options: FocusProbeShaderBuildOptions): SceneShaderSources {
+  if (!hasDistanceEstimator(options.geometrySource)) {
+    throw new Error("Geometry source must define a DE(vec3) function.");
+  }
+
+  const hasBaseColor = hasBaseColorFunction(options.geometrySource);
+  const hasOrbitTrap = hasOrbitTrapDeclaration(options.geometrySource);
+  const fallbackBaseColor = hasBaseColor
+    ? ""
+    : `\nvec3 baseColor(vec3 p, vec3 n) {\n  return vec3(0.85, 0.9, 1.0);\n}\n`;
+  const orbitTrapColorUniformDeclarations = hasOrbitTrap
+    ? buildOrbitTrapColorUniformDeclarations(options.geometrySource)
+    : "";
+  const hasInit = hasInitFunctionDefinition(options.geometrySource);
+  const initInvocation = hasInit
+    ? "  // Legacy Fragmentarium systems often require init() to update globals from uniforms.\n  init();\n"
+    : "";
+  const fragmentariumBridge = buildFragmentariumBridge({ hasOrbitTrap, hasBaseColor });
+
+  const fragmentSource = `#version 300 es
+precision highp float;
+
+in vec2 vUv;
+out vec4 fragColor;
+
+uniform vec3 uEye;
+uniform vec3 uTarget;
+uniform vec3 uUp;
+uniform float uFov;
+uniform vec2 uFocusUv;
+uniform vec2 uViewportSize;
+uniform float uDetailExp;
+uniform int uMaxRaySteps;
+uniform float uMaxDistance;
+uniform float uFudgeFactor;
+
+float DE(vec3 p);
+vec3 baseColor(vec3 p, vec3 n);
+
+${sceneMathPrelude}
+${options.geometrySource}
+${fallbackBaseColor}
+${orbitTrapColorUniformDeclarations}
+${sceneMathPostlude}
+${fragmentariumBridge}
+
+#ifndef HAS_FRAGMENTARIUM_WEB_INIT_GLOBALS
+void fragmentariumWebInitGlobalsImpl() {}
+#endif
+
+const int FRAGMENTARIUM_WEB_MAX_FOCUS_STEPS = 1536;
+
+float fragmentariumWebFocusEpsilon(float detailExp, float t) {
+  float eps = max(pow(10.0, detailExp), 1.0e-6);
+  return max(eps, eps * 0.01 * t);
+}
+
+float fragmentariumWebTraceFocusDistance(vec3 ro, vec3 rd) {
+  float t = 0.0;
+  for (int i = 0; i < FRAGMENTARIUM_WEB_MAX_FOCUS_STEPS; i++) {
+    if (i >= uMaxRaySteps) {
+      break;
+    }
+    vec3 p = ro + rd * t;
+    float eps = fragmentariumWebFocusEpsilon(uDetailExp, t);
+    float d = fragmentariumWebDETrace(p) * uFudgeFactor;
+    if (d < eps) {
+      return t;
+    }
+    t += d;
+    if (t > uMaxDistance) {
+      break;
+    }
+  }
+  return -1.0;
+}
+
+void main() {
+  fragmentariumWebInitGlobalsImpl();
+${initInvocation}  vec2 focusUv = clamp(uFocusUv, vec2(0.0), vec2(1.0));
+  vec2 uv = focusUv * 2.0 - 1.0;
+  uv.x *= uViewportSize.x / max(uViewportSize.y, 1.0);
+
+  vec3 dirRaw = uTarget - uEye;
+  vec3 dir = normalize(length(dirRaw) > 1.0e-6 ? dirRaw : vec3(0.0, 0.0, 1.0));
+  vec3 upOrtho = uUp - dot(uUp, dir) * dir;
+  if (length(upOrtho) <= 1.0e-6) {
+    upOrtho = abs(dir.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    upOrtho = normalize(upOrtho - dot(upOrtho, dir) * dir);
+  } else {
+    upOrtho = normalize(upOrtho);
+  }
+  vec3 right = normalize(cross(dir, upOrtho));
+  vec2 cameraCoord = uv * uFov;
+  vec3 rd = normalize(dir + right * cameraCoord.x + upOrtho * cameraCoord.y);
+  float hitDistance = fragmentariumWebTraceFocusDistance(uEye, rd);
+  fragColor = vec4(hitDistance, 0.0, 0.0, 1.0);
 }
 `;
 

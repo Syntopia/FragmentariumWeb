@@ -75,4 +75,48 @@ describe("UniformPanel", () => {
     fireEvent.click(checkbox);
     expect(lastValue).toBe(true);
   });
+
+  test("uses r/g/b labels for color controls and applies color-picker updates", () => {
+    const uniforms: UniformDefinition[] = [
+      {
+        name: "Tint",
+        type: "vec3",
+        control: "color",
+        group: "Coloring",
+        min: [0, 0, 0],
+        max: [1, 1, 1],
+        defaultValue: [0.1, 0.2, 0.3],
+        lockType: "notlocked",
+        tooltip: ""
+      }
+    ];
+
+    const values: Record<string, UniformValue> = { Tint: [0.1, 0.2, 0.3] };
+    let lastValue: UniformValue | null = null;
+
+    const { container } = render(
+      <UniformPanel
+        uniforms={uniforms}
+        values={values}
+        onChange={(_name, value) => {
+          lastValue = value;
+        }}
+      />
+    );
+
+    const axisLabels = [...container.querySelectorAll(".uniform-axis")].map((entry) =>
+      entry.textContent?.trim().toLowerCase()
+    );
+    expect(axisLabels).toEqual(["r", "g", "b"]);
+
+    const colorPicker = screen.getByLabelText("Tint color") as HTMLInputElement;
+    fireEvent.change(colorPicker, { target: { value: "#336699" } });
+
+    expect(Array.isArray(lastValue)).toBe(true);
+    if (Array.isArray(lastValue)) {
+      expect(lastValue[0]).toBeCloseTo(51 / 255, 5);
+      expect(lastValue[1]).toBeCloseTo(102 / 255, 5);
+      expect(lastValue[2]).toBeCloseTo(153 / 255, 5);
+    }
+  });
 });

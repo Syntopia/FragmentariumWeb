@@ -75,34 +75,29 @@ export class CameraController {
     const rotate = 0.05 * deltaScale;
     const worldUp: Vec3 = [0, 1, 0];
 
-    const planarDir: Vec3 = [basis.dir[0], 0, basis.dir[2]];
-    const hasPlanarDir = Math.abs(planarDir[0]) + Math.abs(planarDir[2]) > 1e-8;
-    const fpsForward = hasPlanarDir ? normalize(planarDir) : basis.dir;
-    const fpsRight = hasPlanarDir ? normalize(cross(worldUp, fpsForward)) : basis.right;
-
     let changed = false;
 
     if (keys.has("a")) {
-      this.translate(scale(fpsRight, -move));
+      this.translate(scale(basis.right, -move));
       changed = true;
     }
     if (keys.has("d")) {
-      this.translate(scale(fpsRight, move));
+      this.translate(scale(basis.right, move));
       changed = true;
     }
     if (keys.has("w")) {
-      this.translate(scale(fpsForward, move));
+      this.translate(scale(basis.dir, move));
       changed = true;
     }
     if (keys.has("s")) {
-      this.translate(scale(fpsForward, -move));
+      this.translate(scale(basis.dir, -move));
       changed = true;
     }
     if (keys.has("r")) {
       this.translate(scale(worldUp, -move));
       changed = true;
     }
-    if (keys.has("f")) {
+    if (keys.has("c") || keys.has("f")) {
       this.translate(scale(worldUp, move));
       changed = true;
     }
@@ -146,6 +141,13 @@ export class CameraController {
     this.orthogonalizeUp();
   }
 
+  orbitAroundOriginFromDrag(dx: number, dy: number): void {
+    const basis = this.getBasis();
+    this.rotateCameraAroundOrigin(basis.upOrtho, -dx * 0.01);
+    this.rotateCameraAroundOrigin(basis.right, -dy * 0.01);
+    this.orthogonalizeUp();
+  }
+
   panFromDrag(dx: number, dy: number): void {
     const basis = this.getBasis();
     const panScale = this.stepSize * 0.08;
@@ -180,6 +182,12 @@ export class CameraController {
   private roll(angle: number): void {
     const dir = normalize(sub(this.state.target, this.state.eye));
     this.state.up = rotateAroundAxis(this.state.up, dir, angle);
+  }
+
+  private rotateCameraAroundOrigin(axis: Vec3, angle: number): void {
+    this.state.eye = rotateAroundAxis(this.state.eye, axis, angle);
+    this.state.target = rotateAroundAxis(this.state.target, axis, angle);
+    this.state.up = rotateAroundAxis(this.state.up, axis, angle);
   }
 
   private translate(offset: Vec3): void {

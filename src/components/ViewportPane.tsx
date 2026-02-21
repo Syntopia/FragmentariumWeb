@@ -1,4 +1,5 @@
 import {
+  useCallback,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
@@ -20,11 +21,24 @@ interface ViewportPaneProps {
   renderSettings: RenderSettings;
   cameraState: CameraState;
   onCameraChange: (state: CameraState) => void;
+  onFocusDistance: (distance: number | null) => void;
   onStatus: (status: RendererStatus) => void;
   onError: (message: string | null) => void;
 }
 
-const movementKeys = new Set(["w", "a", "s", "d", "q", "e", "r", "f", "y", "h", "t", "g"]);
+const movementKeys = new Set(["w", "a", "s", "d", "q", "e", "r", "c", "y", "h", "t", "g"]);
+
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  const element = target as HTMLElement;
+  if (element.isContentEditable) {
+    return true;
+  }
+  const tagName = element.tagName.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select";
+}
 
 export function ViewportPane(props: ViewportPaneProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -32,7 +46,9 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
   const rendererRef = useRef<FragmentRenderer | null>(null);
   const controllerRef = useRef<CameraController>(new CameraController());
   const pressedKeysRef = useRef<Set<string>>(new Set());
-  const dragRef = useRef<{ pointerId: number; mode: "orbit" | "pan" | "zoom" } | null>(null);
+  const isHoveringRef = useRef(false);
+  const lastPointerUvRef = useRef<[number, number] | null>(null);
+  const dragRef = useRef<{ pointerId: number; mode: "orbit" | "orbit-origin" | "pan" | "zoom" } | null>(null);
 
   const sceneKey = useMemo(
     () => `${props.integrator.id}::${props.geometrySource}`,
@@ -155,17 +171,80 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
     props.onCameraChange(next);
   };
 
+  const updatePointerUv = (clientX: number, clientY: number): void => {
+    const canvas = canvasRef.current;
+    if (canvas === null) {
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+
+    const x = (clientX - rect.left) / rect.width;
+    const yFromTop = (clientY - rect.top) / rect.height;
+    const y = 1 - yFromTop;
+    lastPointerUvRef.current = [
+      Math.max(0, Math.min(1, x)),
+      Math.max(0, Math.min(1, y))
+    ];
+  };
+
+  const requestFocusProbe = useCallback((): void => {
+    const focusUv = lastPointerUvRef.current;
+    if (focusUv === null) {
+      console.info("[viewport] Focus probe skipped: mouse position is unavailable.");
+      props.onFocusDistance(null);
+      return;
+    }
+
+    const distance = rendererRef.current?.sampleFocusDistance(focusUv) ?? null;
+    if (distance !== null) {
+      console.info(
+        `[viewport] Focus probe distance=${distance.toFixed(4)} at uv=(${focusUv[0].toFixed(3)}, ${focusUv[1].toFixed(3)}).`
+      );
+    } else {
+      console.info("[viewport] Focus probe returned no hit.");
+    }
+    props.onFocusDistance(distance);
+  }, [props.onFocusDistance]);
+
+  useEffect(() => {
+    const handleWindowKeyDown = (event: KeyboardEvent): void => {
+      if (event.key.toLowerCase() !== "f" || event.repeat) {
+        return;
+      }
+      if (!isHoveringRef.current) {
+        return;
+      }
+      if (isEditableEventTarget(event.target)) {
+        return;
+      }
+      if (document.activeElement === canvasRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+      requestFocusProbe();
+    };
+
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [requestFocusProbe]);
+
   const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     const canvas = canvasRef.current;
     if (canvas === null) {
       return;
     }
 
+    updatePointerUv(event.clientX, event.clientY);
     canvas.focus();
     canvas.setPointerCapture(event.pointerId);
 
-    const mode: "orbit" | "pan" | "zoom" =
-      event.button === 2 ? "pan" : event.button === 1 || event.shiftKey ? "zoom" : "orbit";
+    const mode: "orbit" | "orbit-origin" | "pan" | "zoom" =
+      event.button === 2 ? "pan" : event.button === 1 ? "zoom" : event.shiftKey ? "orbit-origin" : "orbit";
 
     dragRef.current = {
       pointerId: event.pointerId,
@@ -174,6 +253,8 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
+    updatePointerUv(event.clientX, event.clientY);
+
     if (dragRef.current === null || dragRef.current.pointerId !== event.pointerId) {
       return;
     }
@@ -181,6 +262,8 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
     const controller = controllerRef.current;
     if (dragRef.current.mode === "orbit") {
       controller.orbitFromDrag(event.movementX, event.movementY);
+    } else if (dragRef.current.mode === "orbit-origin") {
+      controller.orbitAroundOriginFromDrag(event.movementX, event.movementY);
     } else if (dragRef.current.mode === "pan") {
       controller.panFromDrag(event.movementX, event.movementY);
     } else {
@@ -205,6 +288,14 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLCanvasElement>): void => {
     const key = event.key.toLowerCase();
+
+    if (key === "f") {
+      if (!event.repeat) {
+        requestFocusProbe();
+      }
+      event.preventDefault();
+      return;
+    }
 
     if (key === "1") {
       controllerRef.current.adjustStepSize(0.5);
@@ -243,6 +334,13 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
         ref={canvasRef}
         className="viewport-canvas"
         tabIndex={0}
+        onPointerEnter={(event) => {
+          updatePointerUv(event.clientX, event.clientY);
+          isHoveringRef.current = true;
+        }}
+        onPointerLeave={() => {
+          isHoveringRef.current = false;
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

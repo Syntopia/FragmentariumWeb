@@ -6,7 +6,8 @@ interface UniformPanelProps {
   onChange: (name: string, value: UniformValue) => void;
 }
 
-const vectorLabels = ["X", "Y", "Z", "W"];
+const vectorLabels = ["x", "y", "z", "w"];
+const colorVectorLabels = ["r", "g", "b", "a"];
 
 export function UniformPanel(props: UniformPanelProps): JSX.Element {
   return (
@@ -86,17 +87,28 @@ function UniformControl(props: UniformControlProps): JSX.Element {
   }
 
   const vector = [...value];
-  const colorPreview = definition.control === "color" ? vectorToColor(vector) : null;
+  const axisLabels = definition.control === "color" ? colorVectorLabels : vectorLabels;
+  const colorPreview = definition.control === "color" ? vectorToHexColor(vector) : null;
 
   return (
     <div className="uniform-vector">
       <div className="uniform-vector-header">
         <span className="uniform-label">{definition.name}</span>
-        {colorPreview !== null ? <span className="uniform-color-preview" style={{ background: colorPreview }} /> : null}
+        {colorPreview !== null ? (
+          <input
+            className="uniform-color-preview uniform-color-picker"
+            type="color"
+            aria-label={`${definition.name} color`}
+            value={colorPreview}
+            onChange={(event) => {
+              props.onChange(applyHexColorToVector(vector, event.target.value));
+            }}
+          />
+        ) : null}
       </div>
       {vector.map((entry, index) => (
-        <div className="uniform-row compact" key={`${definition.name}-${vectorLabels[index]}`}>
-          <span className="uniform-axis">{vectorLabels[index]}</span>
+        <div className="uniform-row compact" key={`${definition.name}-${axisLabels[index]}-${index}`}>
+          <span className="uniform-axis">{axisLabels[index]}</span>
           <div className="uniform-inputs">
             <input
               type="range"
@@ -143,9 +155,38 @@ function inferStep(min: number, max: number): number {
   return 0.001;
 }
 
-function vectorToColor(vector: number[]): string {
-  const r = Math.max(0, Math.min(1, vector[0]));
-  const g = Math.max(0, Math.min(1, vector[1]));
-  const b = Math.max(0, Math.min(1, vector[2]));
-  return `rgb(${Math.round(r * 255)} ${Math.round(g * 255)} ${Math.round(b * 255)})`;
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function vectorToHexColor(vector: number[]): string {
+  const toHex = (value: number): string => Math.round(clamp01(value) * 255).toString(16).padStart(2, "0");
+  const r = toHex(vector[0] ?? 0);
+  const g = toHex(vector[1] ?? 0);
+  const b = toHex(vector[2] ?? 0);
+  return `#${r}${g}${b}`;
+}
+
+function applyHexColorToVector(vector: number[], colorHex: string): number[] {
+  const match = /^#?([0-9a-fA-F]{6})$/.exec(colorHex);
+  if (match === null) {
+    return vector;
+  }
+
+  const rgb = match[1];
+  const r = parseInt(rgb.slice(0, 2), 16) / 255;
+  const g = parseInt(rgb.slice(2, 4), 16) / 255;
+  const b = parseInt(rgb.slice(4, 6), 16) / 255;
+
+  const next = [...vector];
+  if (next.length > 0) {
+    next[0] = r;
+  }
+  if (next.length > 1) {
+    next[1] = g;
+  }
+  if (next.length > 2) {
+    next[2] = b;
+  }
+  return next;
 }

@@ -34,6 +34,28 @@ textarea {
   color: inherit;
 }
 
+button {
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    box-shadow 80ms ease,
+    transform 80ms ease;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(95, 163, 255, 0.45);
+}
+
+button:disabled {
+  cursor: default;
+}
+
 .app-root {
   width: 100%;
   height: 100%;
@@ -589,9 +611,22 @@ h3 {
   background: #1f2633;
 }
 
-.settings-clipboard-actions {
+.tab-reset-row {
+  margin-top: auto;
   display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.settings-toolbar-actions {
   gap: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  margin: 8px 0 0;
+}
+
+.settings-toolbar-status {
+  margin: 4px 0 0;
 }
 
 .uniform-group-tabs {
@@ -613,7 +648,8 @@ h3 {
   color: #dcecff;
 }
 
-.settings-clipboard-actions button {
+.settings-toolbar-actions button,
+.tab-reset-row button {
   border: 1px solid var(--line);
   background: #21252f;
   padding: 4px 8px;
@@ -812,6 +848,21 @@ h3 {
   border: 1px solid var(--line);
 }
 
+.uniform-color-picker {
+  padding: 0;
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.uniform-color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.uniform-color-picker::-webkit-color-swatch {
+  border: none;
+}
+
 .error-strip {
   border-top: 1px solid #533;
   background: #2a1717;
@@ -819,7 +870,106 @@ h3 {
   font-size: 12px;
   padding: 6px 10px;
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
+}
+
+.error-strip-messages {
+  display: flex;
+  gap: 16px;
+  flex: 1 1 380px;
+  min-width: 220px;
+}
+
+.error-strip button {
+  border: 1px solid #6a3d3d;
+  background: #3a2323;
+  color: #ffd7d7;
+  font-size: 11px;
+  padding: 3px 8px;
+}
+
+.error-strip-status {
+  color: #ffb7b7;
+  font-size: 11px;
+}
+
+.toast-stack {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1400;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-width: min(340px, calc(100vw - 24px));
+  pointer-events: none;
+}
+
+.toast-item {
+  border: 1px solid #355077;
+  background: #1b2737;
+  color: #dcecff;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(5, 10, 18, 0.35);
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.toast-item.is-error {
+  border-color: #8a4b4b;
+  background: #342020;
+  color: #ffd8d8;
+}
+
+.section-header-row button:not(:disabled):hover,
+.settings-toolbar-actions button:not(:disabled):hover,
+.tab-reset-row button:not(:disabled):hover,
+.modal-actions button:not(:disabled):hover,
+.system-button:not(:disabled):hover,
+.uniform-group-tab:not(:disabled):hover,
+.preset-button:not(:disabled):hover,
+.systems-tree-leaf:not(:disabled):hover,
+.systems-tree-folder:not(:disabled):hover,
+.vertical-tab:not(:disabled):hover,
+.error-strip button:not(:disabled):hover {
+  background: #273041;
+  border-color: #3f5272;
+  color: #eaf1ff;
+}
+
+.section-header-row button:not(:disabled):active,
+.settings-toolbar-actions button:not(:disabled):active,
+.tab-reset-row button:not(:disabled):active,
+.modal-actions button:not(:disabled):active,
+.system-button:not(:disabled):active,
+.uniform-group-tab:not(:disabled):active,
+.preset-button:not(:disabled):active,
+.systems-tree-leaf:not(:disabled):active,
+.systems-tree-folder:not(:disabled):active,
+.vertical-tab:not(:disabled):active,
+.error-strip button:not(:disabled):active {
+  background: #1b2535;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(95, 163, 255, 0.25);
+  transform: translateY(1px);
+}
+
+.systems-tree-delete:not(:disabled):hover,
+.modal-actions .button-danger:not(:disabled):hover {
+  background: #3b2323;
+  border-color: #9f5757;
+  color: #ffd2d2;
+}
+
+.systems-tree-delete:not(:disabled):active,
+.modal-actions .button-danger:not(:disabled):active {
+  background: #2a1a1a;
+  border-color: #d78484;
+  box-shadow: inset 0 0 0 1px rgba(255, 130, 130, 0.25);
+  transform: translateY(1px);
 }
 
 select,

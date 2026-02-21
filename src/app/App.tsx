@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DefinitionEditor } from "../components/DefinitionEditor";
 import { ConfirmDeleteLocalSystemDialog } from "../components/ConfirmDeleteLocalSystemDialog";
 import { SaveLocalSystemDialog } from "../components/SaveLocalSystemDialog";
@@ -32,6 +32,12 @@ import {
   parseSettingsClipboardPayload,
   serializeSettingsClipboardPayload
 } from "./settingsClipboard";
+import {
+  buildDefaultUniformValuesForPreset,
+  resetPostSettingsGroup,
+  resetRenderSettingsGroup,
+  resetUniformGroupValues
+} from "./settingsReset";
 import { getUniformGroupNames, normalizeUniformGroupName } from "./uniformGroups";
 
 const MIN_PANE_WIDTH = 240;
@@ -99,6 +105,12 @@ interface LegacyPersistedState {
 interface SaveLocalDialogState {
   pathValue: string;
   errorMessage: string | null;
+}
+
+interface ToastNotification {
+  id: number;
+  message: string;
+  tone: "info" | "error";
 }
 
 const PRESET_KEY_PREFIX = "preset:";
@@ -451,27 +463,60 @@ function getBaselineSourceForEntry(
 }
 
 function buildSystemsTreeNodes(localSystemsByPath: Record<string, string>): SystemsTreeNode[] {
-  const presetChildrenByCategory = new Map<string, SystemsTreeNode[]>();
-  for (const system of FRACTAL_SYSTEMS) {
-    if (!presetChildrenByCategory.has(system.category)) {
-      presetChildrenByCategory.set(system.category, []);
+  const presetRoot: SystemsTreeFolderNode = {
+    type: "folder",
+    id: "preset-root",
+    name: "System Presets",
+    children: []
+  };
+
+  const ensurePresetFolder = (
+    parent: SystemsTreeFolderNode,
+    folderName: string,
+    fullPath: string
+  ): SystemsTreeFolderNode => {
+    const existing = parent.children.find(
+      (child) => child.type === "folder" && child.id === `preset-folder:${fullPath}`
+    );
+    if (existing !== undefined && existing.type === "folder") {
+      return existing;
     }
-    presetChildrenByCategory.get(system.category)?.push({
+
+    const next: SystemsTreeFolderNode = {
+      type: "folder",
+      id: `preset-folder:${fullPath}`,
+      name: folderName,
+      children: []
+    };
+    parent.children.push(next);
+    return next;
+  };
+
+  for (const system of FRACTAL_SYSTEMS) {
+    const treePath = (system.treePath ?? `${system.category}/${system.name}`)
+      .split("/")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+
+    if (treePath.length === 0) {
+      continue;
+    }
+
+    let folder = presetRoot;
+    for (let i = 0; i < treePath.length - 1; i += 1) {
+      const name = treePath[i];
+      const fullPath = treePath.slice(0, i + 1).join("/");
+      folder = ensurePresetFolder(folder, name, fullPath);
+    }
+
+    const leafName = treePath[treePath.length - 1];
+    folder.children.push({
       type: "leaf",
       id: `preset-leaf:${system.id}`,
-      name: system.name,
+      name: leafName,
       entryKey: makePresetEntryKey(system.id)
     });
   }
-
-  const presetCategoryNodes: SystemsTreeNode[] = [...presetChildrenByCategory.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([category, children]) => ({
-      type: "folder",
-      id: `preset-folder:${category}`,
-      name: category,
-      children: [...children].sort((a, b) => a.name.localeCompare(b.name))
-    }));
 
   const localRoot: SystemsTreeFolderNode = {
     type: "folder",
@@ -538,15 +583,11 @@ function buildSystemsTreeNodes(localSystemsByPath: Record<string, string>): Syst
       }
     }
   };
+  sortNodeChildren(presetRoot);
   sortNodeChildren(localRoot);
 
   return [
-    {
-      type: "folder",
-      id: "preset-root",
-      name: "System Presets",
-      children: presetCategoryNodes
-    },
+    presetRoot,
     localRoot
   ];
 }
@@ -568,9 +609,13 @@ export function App(): JSX.Element {
   const [renderSettings, setRenderSettings] = useState(initial.renderSettings);
   const [activeRightPaneTab, setActiveRightPaneTab] = useState<RightPaneTabId>("integrator");
   const [settingsClipboardStatus, setSettingsClipboardStatus] = useState<string | null>(null);
+  const [errorClipboardStatus, setErrorClipboardStatus] = useState<string | null>(null);
+  const [toastNotifications, setToastNotifications] = useState<ToastNotification[]>([]);
   const [saveLocalDialog, setSaveLocalDialog] = useState<SaveLocalDialogState | null>(null);
   const [deleteLocalDialogPath, setDeleteLocalDialogPath] = useState<string | null>(null);
   const [activeUniformGroupBySystem, setActiveUniformGroupBySystem] = useState<Record<string, string>>({});
+  const nextToastIdRef = useRef(1);
+  const toastTimeoutIdsRef = useRef<number[]>([]);
 
   const [parsedBySystem, setParsedBySystem] = useState<Record<string, ParseResult>>({});
   const [activePresetBySystem, setActivePresetBySystem] = useState<Record<string, string>>({});
@@ -590,6 +635,12 @@ export function App(): JSX.Element {
   const selectedPresetId = parsePresetIdFromKey(selectedSystemKey);
   const selectedLocalPath = parseLocalPathFromKey(selectedSystemKey);
   const selectedPresetSystem = selectedPresetId !== null ? findPresetSystemById(selectedPresetId) : null;
+  const selectedSystemTreePath =
+    selectedPresetSystem?.treePath ??
+    (selectedLocalPath !== null ? `Local Storage/${selectedLocalPath}` : selectedSystemKey);
+  const selectedSystemSourcePath =
+    selectedPresetSystem?.sourcePath ??
+    (selectedLocalPath !== null ? `local/${selectedLocalPath}.frag` : getSourceName(selectedSystemKey));
 
   const baselineSource = getBaselineSourceForEntry(selectedSystemKey, localSystemsByPath);
   const sourceDraft = editorSourceBySystem[selectedSystemKey] ?? baselineSource;
@@ -784,6 +835,27 @@ export function App(): JSX.Element {
     uniformValuesBySystem
   ]);
 
+  useEffect(() => {
+    return () => {
+      for (const timeoutId of toastTimeoutIdsRef.current) {
+        window.clearTimeout(timeoutId);
+      }
+      toastTimeoutIdsRef.current = [];
+    };
+  }, []);
+
+  const pushToast = useCallback((message: string, tone: "info" | "error" = "info"): void => {
+    const id = nextToastIdRef.current;
+    nextToastIdRef.current += 1;
+
+    setToastNotifications((prev) => [...prev, { id, message, tone }]);
+    const timeoutId = window.setTimeout(() => {
+      setToastNotifications((prev) => prev.filter((entry) => entry.id !== id));
+      toastTimeoutIdsRef.current = toastTimeoutIdsRef.current.filter((entry) => entry !== timeoutId);
+    }, 5000);
+    toastTimeoutIdsRef.current.push(timeoutId);
+  }, []);
+
   const onApplyPreset = (path: string): void => {
     if (parseResult === null) {
       return;
@@ -861,6 +933,59 @@ export function App(): JSX.Element {
     setUniformValuesBySystem((prev) => ({ ...prev, [selectedSystemKey]: nextValues }));
   };
 
+  const onFocusDistance = (distance: number | null): void => {
+    if (distance === null || !Number.isFinite(distance) || distance <= 0) {
+      pushToast("Focus probe: no hit detected at screen center.", "error");
+      return;
+    }
+
+    let applied = false;
+    let appliedDistance = distance;
+
+    const focalOption = activeIntegrator.options.find((option) => option.key === "focalDistance");
+    if (focalOption !== undefined) {
+      const clamped = clamp(distance, focalOption.min, focalOption.max);
+      setIntegratorOptionsById((prev) => ({
+        ...prev,
+        [activeIntegratorId]: {
+          ...(prev[activeIntegratorId] ?? getDefaultIntegratorOptions(activeIntegratorId)),
+          focalDistance: clamped
+        }
+      }));
+      applied = true;
+      appliedDistance = clamped;
+    }
+
+    if (parseResult === null) {
+      pushToast(`Focus distance ${appliedDistance.toFixed(3)}.`);
+      return;
+    }
+
+    const focalPlaneDefinition = parseResult.uniforms.find((entry) => entry.name === "FocalPlane");
+    if (focalPlaneDefinition === undefined) {
+      if (applied) {
+        pushToast(`Focus set to ${appliedDistance.toFixed(3)}.`);
+      } else {
+        pushToast(`Focus distance ${appliedDistance.toFixed(3)}.`);
+      }
+      return;
+    }
+
+    const currentValues = uniformValuesBySystem[selectedSystemKey] ?? getDefaultUniformValues(parseResult.uniforms);
+    const nextValues = {
+      ...currentValues,
+      FocalPlane: sanitizeUniformValue(focalPlaneDefinition, distance)
+    };
+    setUniformValuesBySystem((prev) => ({ ...prev, [selectedSystemKey]: nextValues }));
+    applied = true;
+
+    if (applied) {
+      pushToast(`Focus set to ${appliedDistance.toFixed(3)}.`);
+    } else {
+      pushToast(`Focus distance ${appliedDistance.toFixed(3)}.`);
+    }
+  };
+
   const onIntegratorOptionChange = (key: string, value: number): void => {
     setIntegratorOptionsById((prev) => ({
       ...prev,
@@ -873,6 +998,72 @@ export function App(): JSX.Element {
 
   const onRenderSettingChange = <K extends keyof RenderSettings>(key: K, value: RenderSettings[K]): void => {
     setRenderSettings((prev) => coerceRenderSettings({ ...prev, [key]: value }));
+  };
+
+  const onResetActiveIntegratorOptions = (): void => {
+    setIntegratorOptionsById((prev) => ({
+      ...prev,
+      [activeIntegratorId]: getDefaultIntegratorOptions(activeIntegratorId)
+    }));
+  };
+
+  const onResetRenderGroupSettings = (): void => {
+    setRenderSettings((prev) => resetRenderSettingsGroup(prev));
+  };
+
+  const onResetPostGroupSettings = (): void => {
+    setRenderSettings((prev) => resetPostSettingsGroup(prev));
+  };
+
+  const onResetActiveUniformGroupSettings = (): void => {
+    if (parseResult === null || selectedUniformGroup === null) {
+      return;
+    }
+
+    const currentValues = uniformValuesBySystem[selectedSystemKey] ?? getDefaultUniformValues(parseResult.uniforms);
+    const nextUniformValues = resetUniformGroupValues({
+      uniforms: parseResult.uniforms,
+      presets: parseResult.presets,
+      selectedPresetName: activePresetBySystem[selectedSystemKey] ?? null,
+      currentValues,
+      groupName: selectedUniformGroup
+    });
+    const nextCamera = deriveCameraFromUniformValues(parseResult.uniforms, nextUniformValues, cameraState);
+
+    setUniformValuesBySystem((prev) => ({
+      ...prev,
+      [selectedSystemKey]: nextUniformValues
+    }));
+    setCameraBySystem((prev) => ({
+      ...prev,
+      [selectedSystemKey]: nextCamera
+    }));
+  };
+
+  const onResetAllSettings = (): void => {
+    onResetActiveIntegratorOptions();
+    setRenderSettings({ ...DEFAULT_RENDER_SETTINGS });
+
+    if (parseResult !== null) {
+      const nextUniformValues = buildDefaultUniformValuesForPreset({
+        uniforms: parseResult.uniforms,
+        presets: parseResult.presets,
+        selectedPresetName: activePresetBySystem[selectedSystemKey] ?? null
+      });
+      const nextCamera = deriveCameraFromUniformValues(parseResult.uniforms, nextUniformValues, cameraState);
+
+      setUniformValuesBySystem((prev) => ({
+        ...prev,
+        [selectedSystemKey]: nextUniformValues
+      }));
+      setCameraBySystem((prev) => ({
+        ...prev,
+        [selectedSystemKey]: nextCamera
+      }));
+    }
+
+    setSettingsClipboardStatus("Settings reset to defaults.");
+    console.info(`[app] Reset settings to defaults for '${selectedSystemKey}'.`);
   };
 
   const onCopySettingsToClipboard = async (): Promise<void> => {
@@ -965,6 +1156,34 @@ export function App(): JSX.Element {
       const message = error instanceof Error ? error.message : String(error);
       setSettingsClipboardStatus(`Paste failed: ${message}`);
       console.error(`[app] Failed to paste settings: ${message}`);
+    }
+  };
+
+  const onCopyErrorToClipboard = async (): Promise<void> => {
+    try {
+      if (navigator.clipboard === undefined || typeof navigator.clipboard.writeText !== "function") {
+        throw new Error("Clipboard API writeText is unavailable in this browser context.");
+      }
+
+      const payloadLines = [
+        "Fragmentarium Web Error Report",
+        `System: ${selectedSystemKey}`,
+        `Tree path: ${selectedSystemTreePath}`,
+        `Source path: ${selectedSystemSourcePath}`,
+        `Integrator: ${activeIntegrator.name} (${activeIntegrator.id})`,
+        `Preset: ${activePresetBySystem[selectedSystemKey] ?? "None"}`,
+        "",
+        compileError !== null ? `Compile error:\n${compileError}` : null,
+        shaderError !== null ? `Shader error:\n${shaderError}` : null
+      ].filter((entry): entry is string => entry !== null);
+
+      await navigator.clipboard.writeText(payloadLines.join("\n"));
+      setErrorClipboardStatus("Error details copied.");
+      console.info(`[app] Copied error details for '${selectedSystemTreePath}' to clipboard.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setErrorClipboardStatus(`Copy failed: ${message}`);
+      console.error(`[app] Failed to copy error details: ${message}`);
     }
   };
 
@@ -1194,6 +1413,7 @@ export function App(): JSX.Element {
         renderSettings={renderSettings}
         cameraState={cameraState}
         onCameraChange={onCameraChange}
+        onFocusDistance={onFocusDistance}
         onStatus={setStatus}
         onError={setShaderError}
       />
@@ -1288,6 +1508,11 @@ export function App(): JSX.Element {
                     </div>
                   );
                 })}
+              </div>
+              <div className="tab-reset-row">
+                <button type="button" onClick={onResetActiveIntegratorOptions}>
+                  Reset Group
+                </button>
               </div>
             </>
           ) : null}
@@ -1391,6 +1616,11 @@ export function App(): JSX.Element {
                     />
                   </div>
                 </div>
+              </div>
+              <div className="tab-reset-row">
+                <button type="button" onClick={onResetRenderGroupSettings}>
+                  Reset Group
+                </button>
               </div>
             </>
           ) : null}
@@ -1538,6 +1768,11 @@ export function App(): JSX.Element {
                   </div>
                 </div>
               </div>
+              <div className="tab-reset-row">
+                <button type="button" onClick={onResetPostGroupSettings}>
+                  Reset Group
+                </button>
+              </div>
             </>
           ) : null}
 
@@ -1558,6 +1793,15 @@ export function App(): JSX.Element {
                   <p className="muted">Compile a system to expose parameters.</p>
                 )}
               </div>
+              <div className="tab-reset-row">
+                <button
+                  type="button"
+                  onClick={onResetActiveUniformGroupSettings}
+                  disabled={parseResult === null || visibleUniforms.length === 0}
+                >
+                  Reset Group
+                </button>
+              </div>
             </>
           ) : null}
         </div>
@@ -1569,17 +1813,20 @@ export function App(): JSX.Element {
         />
       </section>
 
-      <section className="section-block">
-        <div className="settings-clipboard-actions">
-          <button type="button" onClick={() => void onCopySettingsToClipboard()}>
-            Copy to Clipboard
-          </button>
-          <button type="button" onClick={() => void onPasteSettingsFromClipboard()}>
-            Paste from Clipboard
-          </button>
-        </div>
-        {settingsClipboardStatus !== null ? <p className="muted">{settingsClipboardStatus}</p> : null}
-      </section>
+      <div className="settings-toolbar-actions">
+        <button type="button" onClick={() => void onCopySettingsToClipboard()}>
+          Copy to Clipboard
+        </button>
+        <button type="button" onClick={() => void onPasteSettingsFromClipboard()}>
+          Paste from Clipboard
+        </button>
+        <button type="button" onClick={onResetAllSettings}>
+          Reset Settings
+        </button>
+      </div>
+      {settingsClipboardStatus !== null ? (
+        <p className="muted settings-toolbar-status">{settingsClipboardStatus}</p>
+      ) : null}
     </div>
   );
 
@@ -1602,10 +1849,24 @@ export function App(): JSX.Element {
 
       {(compileError !== null || shaderError !== null) && (
         <div className="error-strip">
-          {compileError !== null ? <span>Compile error: {compileError}</span> : null}
-          {shaderError !== null ? <span>Shader error: {shaderError}</span> : null}
+          <div className="error-strip-messages">
+            {compileError !== null ? <span>Compile error: {compileError}</span> : null}
+            {shaderError !== null ? <span>Shader error: {shaderError}</span> : null}
+          </div>
+          <button type="button" onClick={() => void onCopyErrorToClipboard()}>
+            Copy Error
+          </button>
+          {errorClipboardStatus !== null ? <span className="error-strip-status">{errorClipboardStatus}</span> : null}
         </div>
       )}
+
+      <div className="toast-stack" aria-live="polite" aria-atomic="false">
+        {toastNotifications.map((toast) => (
+          <div key={toast.id} className={`toast-item${toast.tone === "error" ? " is-error" : ""}`}>
+            {toast.message}
+          </div>
+        ))}
+      </div>
 
       <SaveLocalSystemDialog
         open={saveLocalDialog !== null}
