@@ -129,7 +129,7 @@ describe("port compatibility", () => {
     expect(composed.fragmentSource).toContain("init();");
   });
 
-  test("orbit-trap Mandelbulb gets synthetic coloring uniforms and bridge coloring fallback", () => {
+  test("orbit-trap Mandelbulb uses the bridge trap capture without synthetic palette uniforms", () => {
     const system = FRACTAL_SYSTEMS.find((s) => s.id === "fragmentarium/historical-3d-fractals/mandelbulb");
     expect(system).toBeDefined();
     if (system === undefined) {
@@ -142,16 +142,18 @@ describe("port compatibility", () => {
       includeMap: SYSTEM_INCLUDE_MAP
     });
 
-    expect(parsed.uniforms.map((entry) => entry.name)).toEqual(
-      expect.arrayContaining(["BaseColor", "OrbitStrength", "X", "Y", "Z", "R", "CycleColors", "Cycles"])
-    );
+    expect(parsed.uniforms.map((entry) => entry.name)).not.toContain("BaseColor");
+    expect(parsed.uniforms.map((entry) => entry.name)).not.toContain("OrbitStrength");
+    expect(parsed.shaderSource).not.toContain("uniform vec3 BaseColor;");
+    expect(parsed.shaderSource).not.toContain("uniform float OrbitStrength;");
 
     const composed = buildSceneShaderSources({
       geometrySource: parsed.shaderSource,
       integrator: getIntegratorById("de-pathtracer-physical")
     });
 
-    expect(composed.fragmentSource).toContain("vec3 fragmentariumWebOrbitTrapBaseColor()");
+    expect(composed.fragmentSource).toContain("float fragmentariumWebOrbitTrapValue(float falloff)");
     expect(composed.fragmentSource).toContain("fragmentariumResolveBaseColor");
+    expect(composed.fragmentSource).not.toContain("vec3 fragmentariumWebOrbitTrapBaseColor()");
   });
 });

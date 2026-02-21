@@ -41,7 +41,7 @@ p.yz = rotate(p.yz,RZ);
 	p.yz = rotate(p.yz,R5);
 	p.xz = rotate(p.xz,angle);
 	p.x =p.x -  R3;
-	return length(p.xz)-R2;
+	return 0.5 * (length(p.xz)-R2);
 }
 
 #preset Default

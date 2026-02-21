@@ -5,7 +5,7 @@ import type {
   UniformControl,
   UniformDefinition,
   UniformType,
-  UniformValue
+  UniformValue,
 } from "./types";
 
 const GROUP_DIRECTIVE = /^\s*#group\s+(.+)\s*$/i;
@@ -40,100 +40,6 @@ interface GlobalUniformDependentInitializer {
 }
 
 const lockTypes = new Set(["locked", "notlocked", "notlockable", "alwayslocked"]);
-
-interface SyntheticUniformSpec {
-  name: string;
-  type: UniformType;
-  control: UniformControl;
-  group: string;
-  min: number[];
-  max: number[];
-  defaultValue: UniformValue;
-  tooltip: string;
-}
-
-const orbitTrapColorUniformSpecs: SyntheticUniformSpec[] = [
-  {
-    name: "BaseColor",
-    type: "vec3",
-    control: "color",
-    group: "Coloring",
-    min: [0, 0, 0],
-    max: [1, 1, 1],
-    defaultValue: [1, 1, 1],
-    tooltip: "Pure object color in white light."
-  },
-  {
-    name: "OrbitStrength",
-    type: "float",
-    control: "slider",
-    group: "Coloring",
-    min: [0],
-    max: [1],
-    defaultValue: 0,
-    tooltip: "Mix between base color and orbit-trap color."
-  },
-  {
-    name: "X",
-    type: "vec4",
-    control: "color",
-    group: "Coloring",
-    min: [0, 0, 0, -1],
-    max: [1, 1, 1, 1],
-    defaultValue: [0.5, 0.6, 0.6, 0.7],
-    tooltip: "Orbit trap color/weight for YZ-plane distance."
-  },
-  {
-    name: "Y",
-    type: "vec4",
-    control: "color",
-    group: "Coloring",
-    min: [0, 0, 0, -1],
-    max: [1, 1, 1, 1],
-    defaultValue: [1.0, 0.6, 0.0, 0.4],
-    tooltip: "Orbit trap color/weight for XZ-plane distance."
-  },
-  {
-    name: "Z",
-    type: "vec4",
-    control: "color",
-    group: "Coloring",
-    min: [0, 0, 0, -1],
-    max: [1, 1, 1, 1],
-    defaultValue: [0.8, 0.78, 1.0, 0.5],
-    tooltip: "Orbit trap color/weight for XY-plane distance."
-  },
-  {
-    name: "R",
-    type: "vec4",
-    control: "color",
-    group: "Coloring",
-    min: [0, 0, 0, -1],
-    max: [1, 1, 1, 1],
-    defaultValue: [0.4, 0.7, 1.0, 0.12],
-    tooltip: "Orbit trap color/weight for radial distance."
-  },
-  {
-    name: "CycleColors",
-    type: "bool",
-    control: "checkbox",
-    group: "Coloring",
-    min: [0],
-    max: [1],
-    defaultValue: false,
-    tooltip: "Enable cosine color cycling for orbit-trap channels."
-  },
-  {
-    name: "Cycles",
-    type: "float",
-    control: "slider",
-    group: "Coloring",
-    min: [0.1],
-    max: [32.3],
-    defaultValue: 1.1,
-    tooltip: "Cycle frequency when color cycling is enabled."
-  }
-];
 
 function toLines(source: string): string[] {
   return source.split(/\r\n|\r|\n/);
@@ -225,46 +131,6 @@ function parseFallbackUniformShaderLine(line: string): string | null {
     return null;
   }
   return match[1].trimEnd();
-}
-
-function hasOrbitTrapDeclaration(source: string): boolean {
-  return /\bvec4\s+orbitTrap\b/.test(source);
-}
-
-function appendSyntheticOrbitTrapColorUniforms(
-  outputLines: string[],
-  uniforms: UniformDefinition[],
-  groups: Set<string>
-): void {
-  const existingUniformNames = gatherUniformNames(outputLines);
-  for (const uniform of uniforms) {
-    existingUniformNames.add(uniform.name);
-  }
-
-  let addedAny = false;
-  for (const spec of orbitTrapColorUniformSpecs) {
-    if (existingUniformNames.has(spec.name)) {
-      continue;
-    }
-    uniforms.push({
-      name: spec.name,
-      type: spec.type,
-      control: spec.control,
-      group: spec.group,
-      min: [...spec.min],
-      max: [...spec.max],
-      defaultValue: Array.isArray(spec.defaultValue) ? [...spec.defaultValue] : spec.defaultValue,
-      lockType: "notlocked",
-      tooltip: spec.tooltip
-    });
-    outputLines.push(`uniform ${spec.type} ${spec.name};`);
-    existingUniformNames.add(spec.name);
-    addedAny = true;
-  }
-
-  if (addedAny) {
-    groups.add("Coloring");
-  }
 }
 
 function parseLockType(raw: string | undefined): UniformDefinition["lockType"] {
@@ -659,10 +525,6 @@ export function parseFragmentSource(options: ParserOptions): ParseResult {
     } else {
       lastComment = "";
     }
-  }
-
-  if (hasOrbitTrapDeclaration(outputLines.join("\n"))) {
-    appendSyntheticOrbitTrapColorUniforms(outputLines, uniforms, groups);
   }
 
   if (globalInitAssignments.length > 0) {

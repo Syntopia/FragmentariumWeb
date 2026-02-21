@@ -50,7 +50,7 @@ float DE(vec3 p) {
     expect(sources.fragmentSource).toContain("  init();");
   });
 
-  test("adds orbit-trap bridge and legacy coloring uniforms when baseColor is missing", () => {
+  test("adds orbit-trap bridge without legacy palette uniforms", () => {
     const integrator = getIntegratorById("de-raytracer");
     const geometrySource = `
 vec4 orbitTrap = vec4(1.0e20);
@@ -68,11 +68,12 @@ float DE(vec3 p) {
 
     expect(sources.fragmentSource).toContain("float fragmentariumWebDETrace(vec3 p)");
     expect(sources.fragmentSource).toContain("float fragmentariumWebDESample(vec3 p)");
-    expect(sources.fragmentSource).toContain("vec3 fragmentariumWebOrbitTrapBaseColor()");
     expect(sources.fragmentSource).toContain("vec3 fragmentariumResolveBaseColor(vec3 p, vec3 n)");
-    expect(sources.fragmentSource).toContain("uniform vec3 BaseColor;");
-    expect(sources.fragmentSource).toContain("uniform float OrbitStrength;");
-    expect(sources.fragmentSource).toContain("uniform bool CycleColors;");
+    expect(sources.fragmentSource).toContain("return baseColor(p, n);");
+    expect(sources.fragmentSource).not.toContain("vec3 fragmentariumWebOrbitTrapBaseColor()");
+    expect(sources.fragmentSource).not.toContain("uniform vec3 BaseColor;");
+    expect(sources.fragmentSource).not.toContain("uniform float OrbitStrength;");
+    expect(sources.fragmentSource).not.toContain("uniform bool CycleColors;");
   });
 
   test("restores captured orbit trap before calling custom baseColor", () => {

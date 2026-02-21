@@ -177,30 +177,7 @@ float fragmentariumWebCameraFocalDistance() {
 `;
 }
 
-const orbitTrapColorUniformSpecs: Array<{ name: string; type: string }> = [
-  { name: "BaseColor", type: "vec3" },
-  { name: "OrbitStrength", type: "float" },
-  { name: "X", type: "vec4" },
-  { name: "Y", type: "vec4" },
-  { name: "Z", type: "vec4" },
-  { name: "R", type: "vec4" },
-  { name: "CycleColors", type: "bool" },
-  { name: "Cycles", type: "float" }
-];
-
-function buildOrbitTrapColorUniformDeclarations(source: string): string {
-  const declarations = orbitTrapColorUniformSpecs
-    .filter((spec) => !hasUniformDeclaration(source, spec.name))
-    .map((spec) => `uniform ${spec.type} ${spec.name};`);
-
-  if (declarations.length === 0) {
-    return "";
-  }
-
-  return `\n${declarations.join("\n")}\n`;
-}
-
-function buildFragmentariumBridge(options: { hasOrbitTrap: boolean; hasBaseColor: boolean }): string {
+function buildFragmentariumBridge(options: { hasOrbitTrap: boolean }): string {
   if (!options.hasOrbitTrap) {
     return `
 float fragmentariumWebDETrace(vec3 p) {
@@ -220,44 +197,6 @@ vec3 fragmentariumResolveBaseColor(vec3 p, vec3 n) {
 }
 `;
   }
-
-  const orbitTrapColoring = options.hasBaseColor
-    ? ""
-    : `
-vec3 fragmentariumWebCycleColor(vec3 c, float s) {
-  return vec3(0.5) + 0.5 * vec3(
-    cos(s * Cycles + c.x),
-    cos(s * Cycles + c.y),
-    cos(s * Cycles + c.z)
-  );
-}
-
-vec3 fragmentariumWebOrbitTrapBaseColor() {
-  vec4 trap = fragmentariumWebCapturedOrbitTrap;
-  trap.w = sqrt(max(trap.w, 0.0));
-
-  vec3 orbitColor;
-  if (CycleColors) {
-    orbitColor =
-      fragmentariumWebCycleColor(X.xyz, trap.x) * X.w * trap.x +
-      fragmentariumWebCycleColor(Y.xyz, trap.y) * Y.w * trap.y +
-      fragmentariumWebCycleColor(Z.xyz, trap.z) * Z.w * trap.z +
-      fragmentariumWebCycleColor(R.xyz, trap.w) * R.w * trap.w;
-  } else {
-    orbitColor =
-      X.xyz * X.w * trap.x +
-      Y.xyz * Y.w * trap.y +
-      Z.xyz * Z.w * trap.z +
-      R.xyz * R.w * trap.w;
-  }
-
-  return mix(BaseColor, 3.0 * orbitColor, clamp(OrbitStrength, 0.0, 1.0));
-}
-`;
-
-  const resolveColorCall = options.hasBaseColor
-    ? "  return baseColor(p, n);"
-    : "  return fragmentariumWebOrbitTrapBaseColor();";
 
   return `
 vec4 fragmentariumWebCapturedOrbitTrap = vec4(10000.0);
@@ -293,10 +232,10 @@ float fragmentariumWebOrbitTrapValue(float falloff) {
 void fragmentariumWebRestoreCapturedOrbitTrap() {
   orbitTrap = fragmentariumWebCapturedOrbitTrap;
 }
-${orbitTrapColoring}
+
 vec3 fragmentariumResolveBaseColor(vec3 p, vec3 n) {
   fragmentariumWebRestoreCapturedOrbitTrap();
-${resolveColorCall}
+  return baseColor(p, n);
 }
 `;
 }
@@ -314,14 +253,11 @@ export function buildSceneShaderSources(options: SceneShaderBuildOptions): Scene
   const fallbackBaseColor = hasBaseColor
     ? ""
     : `\nvec3 baseColor(vec3 p, vec3 n) {\n  return vec3(0.85, 0.9, 1.0);\n}\n`;
-  const orbitTrapColorUniformDeclarations = hasOrbitTrap
-    ? buildOrbitTrapColorUniformDeclarations(options.geometrySource)
-    : "";
   const hasInit = hasInitFunctionDefinition(options.geometrySource);
   const initInvocation = hasInit
     ? "  // Legacy Fragmentarium systems often require init() to update globals from uniforms.\n  init();\n"
     : "";
-  const fragmentariumBridge = buildFragmentariumBridge({ hasOrbitTrap, hasBaseColor });
+  const fragmentariumBridge = buildFragmentariumBridge({ hasOrbitTrap });
   const apertureResolver = buildCameraApertureResolver(hasApertureUniform);
   const focalDistanceResolver = buildCameraFocalDistanceResolver(hasFocalPlaneUniform);
 
@@ -352,7 +288,6 @@ vec3 baseColor(vec3 p, vec3 n);
 ${sceneMathPrelude}
 ${options.geometrySource}
 ${fallbackBaseColor}
-${orbitTrapColorUniformDeclarations}
 ${sceneMathPostlude}
 ${fragmentariumBridge}
 ${options.integrator.glsl}
@@ -374,6 +309,16 @@ vec2 fragmentariumWebSampleDisk(vec2 p) {
   float theta = 6.283185307179586 * u2;
   return vec2(cos(theta), sin(theta)) * r;
 }
+
+#ifdef FRAGMENTARIUM_WEB_HAS_PCG_RNG
+vec2 fragmentariumWebSampleDiskRng(inout uint rngState) {
+  float u1 = rand(rngState);
+  float u2 = rand(rngState);
+  float r = sqrt(u1);
+  float theta = 6.283185307179586 * u2;
+  return vec2(cos(theta), sin(theta)) * r;
+}
+#endif
 ${apertureResolver}
 ${focalDistanceResolver}
 void cameraRay(vec2 fragCoord, out vec3 rayOrigin, out vec3 rayDir) {
@@ -401,9 +346,14 @@ void cameraRay(vec2 fragCoord, out vec3 rayOrigin, out vec3 rayDir) {
   float aperture = fragmentariumWebCameraAperture();
   float focalDistance = fragmentariumWebCameraFocalDistance();
   if (aperture > 1.0e-6) {
+#ifdef FRAGMENTARIUM_WEB_HAS_PCG_RNG
+    uint lensRng = fragmentariumWebRngInit(fragCoord, uSubframe, uFrameIndex + 7919);
+    vec2 lens = fragmentariumWebSampleDiskRng(lensRng) * aperture;
+#else
     vec2 lens = fragmentariumWebSampleDisk(
       fragCoord + vec2(71.13, 29.47) * (float(uSubframe + 1) + frameSeed * 0.5)
     ) * aperture;
+#endif
     vec3 lensOffset = right * lens.x + upOrtho * lens.y;
     vec3 focusPoint = uEye + pinholeDir * focalDistance;
     rayOrigin = uEye + lensOffset;
@@ -447,14 +397,11 @@ export function buildFocusProbeShaderSources(options: FocusProbeShaderBuildOptio
   const fallbackBaseColor = hasBaseColor
     ? ""
     : `\nvec3 baseColor(vec3 p, vec3 n) {\n  return vec3(0.85, 0.9, 1.0);\n}\n`;
-  const orbitTrapColorUniformDeclarations = hasOrbitTrap
-    ? buildOrbitTrapColorUniformDeclarations(options.geometrySource)
-    : "";
   const hasInit = hasInitFunctionDefinition(options.geometrySource);
   const initInvocation = hasInit
     ? "  // Legacy Fragmentarium systems often require init() to update globals from uniforms.\n  init();\n"
     : "";
-  const fragmentariumBridge = buildFragmentariumBridge({ hasOrbitTrap, hasBaseColor });
+  const fragmentariumBridge = buildFragmentariumBridge({ hasOrbitTrap });
 
   const fragmentSource = `#version 300 es
 precision highp float;
@@ -479,7 +426,6 @@ vec3 baseColor(vec3 p, vec3 n);
 ${sceneMathPrelude}
 ${options.geometrySource}
 ${fallbackBaseColor}
-${orbitTrapColorUniformDeclarations}
 ${sceneMathPostlude}
 ${fragmentariumBridge}
 

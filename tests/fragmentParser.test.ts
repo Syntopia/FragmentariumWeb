@@ -145,7 +145,7 @@ float DE(vec3 p) { return length(p) - 1.0; }
     expect(result.shaderSource).not.toContain("file[texture.jpg]");
   });
 
-  test("synthesizes orbit-trap coloring uniforms for legacy systems", () => {
+  test("does not synthesize legacy orbit-trap palette uniforms", () => {
     const source = `
 vec4 orbitTrap = vec4(1.0e20);
 
@@ -169,12 +169,14 @@ Cycles = 3.5
     });
 
     const uniformNames = result.uniforms.map((entry) => entry.name);
-    expect(uniformNames).toEqual(
-      expect.arrayContaining(["BaseColor", "OrbitStrength", "X", "Y", "Z", "R", "CycleColors", "Cycles"])
-    );
-    expect(result.groups).toContain("Coloring");
-    expect(result.shaderSource).toContain("uniform vec3 BaseColor;");
-    expect(result.shaderSource).toContain("uniform float OrbitStrength;");
-    expect(result.shaderSource).toContain("uniform bool CycleColors;");
+    expect(uniformNames).not.toContain("BaseColor");
+    expect(uniformNames).not.toContain("OrbitStrength");
+    expect(uniformNames).not.toContain("CycleColors");
+    expect(result.shaderSource).not.toContain("uniform vec3 BaseColor;");
+    expect(result.shaderSource).not.toContain("uniform float OrbitStrength;");
+    expect(result.shaderSource).not.toContain("uniform bool CycleColors;");
+    expect(result.presets[0].values.BaseColor).toEqual([0.2, 0.4, 0.8]);
+    expect(result.presets[0].values.OrbitStrength).toBe(0.7);
+    expect(result.presets[0].values.CycleColors).toBe(true);
   });
 });

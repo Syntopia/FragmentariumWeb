@@ -24,6 +24,11 @@ describe("integrators", () => {
     expect(qualityDefaults.metalness).toBe(0.05);
     expect(qualityDefaults.roughness).toBe(0.35);
     expect(qualityDefaults.orbitTrapFalloff).toBe(5.5);
+    expect(qualityDefaults.orbitTrapHueOffset).toBe(0);
+    expect(qualityDefaults.orbitTrapHueScale).toBe(1);
+    expect(qualityDefaults.orbitTrapSaturation).toBe(1);
+    expect(qualityDefaults.orbitTrapValue).toBe(1);
+    expect(qualityDefaults.orbitTrapMix).toBe(1);
     expect(qualityDefaults.aperture).toBe(0);
     expect(qualityDefaults.focalDistance).toBe(6);
     expect(qualityDefaults.aaJitter).toBe(1);
@@ -41,6 +46,11 @@ describe("integrators", () => {
     expect(integrator.options.some((option) => option.key === "metallic")).toBe(true);
     expect(integrator.options.some((option) => option.key === "useOrbitTrap")).toBe(true);
     expect(integrator.options.some((option) => option.key === "orbitTrapFalloff")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "orbitTrapHueOffset")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "orbitTrapHueScale")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "orbitTrapSaturation")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "orbitTrapValue")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "orbitTrapMix")).toBe(true);
     expect(integrator.options.some((option) => option.key === "sunAngularDiameterDeg")).toBe(true);
     expect(integrator.options.some((option) => option.key === "areaLightEnabled")).toBe(true);
     expect(integrator.options.some((option) => option.key === "areaLightIntensity")).toBe(true);
@@ -56,11 +66,16 @@ describe("integrators", () => {
     expect(integrator.options.some((option) => option.key === "aaJitter")).toBe(true);
 
     const defaults = getDefaultIntegratorOptions("de-pathtracer-physical");
-    expect(defaults.bounceCount).toBe(6);
+    expect(defaults.bounceCount).toBe(3);
     expect(defaults.roughness).toBe(0.35);
-    expect(defaults.sampleClamp).toBe(0);
+    expect(defaults.sampleClamp).toBe(3);
     expect(defaults.useOrbitTrap).toBe(1);
     expect(defaults.orbitTrapFalloff).toBe(5.5);
+    expect(defaults.orbitTrapHueOffset).toBe(0);
+    expect(defaults.orbitTrapHueScale).toBe(1);
+    expect(defaults.orbitTrapSaturation).toBe(1);
+    expect(defaults.orbitTrapValue).toBe(1);
+    expect(defaults.orbitTrapMix).toBe(1);
     expect(defaults.directLight).toBe(1);
     expect(defaults.detailExp).toBe(-2.7);
     expect(defaults.maxRaySteps).toBe(200);

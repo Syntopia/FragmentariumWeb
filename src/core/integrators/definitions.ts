@@ -9,11 +9,21 @@ uniform float uIntegrator_fudgeFactor;
 uniform float uIntegrator_aoStrength;
 uniform int uIntegrator_aoSamples;
 uniform float uIntegrator_shadowStrength;
+uniform float uIntegrator_shadowSoftness;
 uniform float uIntegrator_fog;
 uniform float uIntegrator_backgroundStrength;
+uniform float uIntegrator_sunAzimuth;
+uniform float uIntegrator_sunElevation;
 
 const int MAX_TRACE_STEPS = 1024;
 const int MAX_AO_SAMPLES = 8;
+
+vec3 computeSunDirection() {
+  float az = radians(uIntegrator_sunAzimuth);
+  float el = radians(uIntegrator_sunElevation);
+  float cosEl = cos(el);
+  return normalize(vec3(sin(az) * cosEl, sin(el), cos(az) * cosEl));
+}
 
 float baseEpsilon() {
   return max(pow(10.0, uIntegrator_detailExp), 1.0e-6);
@@ -37,6 +47,7 @@ vec3 estimateNormalDE(vec3 p, float t) {
 
 bool tracePrimary(vec3 ro, vec3 rd, out float hitT) {
   float t = 0.0;
+  float prevT = 0.0;
 
   for (int i = 0; i < MAX_TRACE_STEPS; i++) {
     if (i >= uIntegrator_maxRaySteps) {
@@ -47,10 +58,21 @@ bool tracePrimary(vec3 ro, vec3 rd, out float hitT) {
     float eps = hitEpsilon(t);
     float d = fragmentariumWebDETrace(p) * uIntegrator_fudgeFactor;
     if (d < eps) {
-      hitT = t;
+      float lo = prevT;
+      float hi = t;
+      for (int b = 0; b < 4; b++) {
+        float mid = 0.5 * (lo + hi);
+        if (fragmentariumWebDESample(ro + rd * mid) * uIntegrator_fudgeFactor < hitEpsilon(mid)) {
+          hi = mid;
+        } else {
+          lo = mid;
+        }
+      }
+      hitT = hi;
       return true;
     }
 
+    prevT = t;
     t += d;
     if (t > float(uIntegrator_maxDistance)) {
       break;
@@ -76,7 +98,10 @@ float traceShadow(vec3 ro, vec3 rd, float startT) {
     if (d < eps) {
       return 0.0;
     }
-    visibility = min(visibility, 12.0 * d / max(t, 1.0e-5));
+    visibility = min(visibility, uIntegrator_shadowSoftness * d / max(t, 1.0e-5));
+    if (visibility < 0.01) {
+      return 0.0;
+    }
     t += max(d, eps * 0.5);
     if (t > float(uIntegrator_maxDistance)) {
       break;
@@ -125,7 +150,7 @@ vec3 renderColor(vec3 ro, vec3 rd) {
   float eps = hitEpsilon(t);
   vec3 n = estimateNormalDE(p, t);
   vec3 base = fragmentariumResolveBaseColor(p, n);
-  vec3 sunDir = normalize(vec3(0.6, 0.7, 0.2));
+  vec3 sunDir = computeSunDirection();
   vec3 fillDir = normalize(vec3(-0.4, 0.4, -0.5));
 
   float ao = ambientOcclusion(p, n);
@@ -157,8 +182,11 @@ const deFastOptionTemplate: IntegratorOptionDefinition[] = [
   { key: "aoStrength", label: "AO Strength", min: 0, max: 2, defaultValue: 0.7, step: 0.01 },
   { key: "aoSamples", label: "AO Samples", min: 0, max: 8, defaultValue: 5, step: 1 },
   { key: "shadowStrength", label: "Shadow Strength", min: 0, max: 1, defaultValue: 0.5, step: 0.01 },
+  { key: "shadowSoftness", label: "Shadow Softness", min: 1, max: 100, defaultValue: 12, step: 0.1 },
   { key: "fog", label: "Fog", min: 0, max: 2, defaultValue: 0.2, step: 0.01 },
   { key: "backgroundStrength", label: "Background", min: 0, max: 1, defaultValue: 0.2, step: 0.01 },
+  { key: "sunAzimuth", label: "Sun Azimuth", min: 0, max: 360, defaultValue: 20, step: 0.1 },
+  { key: "sunElevation", label: "Sun Elevation", min: -10, max: 90, defaultValue: 45, step: 0.1 },
   { key: "aperture", label: "Aperture", min: 0, max: 0.2, defaultValue: 0, step: 0.0001 },
   { key: "focalDistance", label: "Focal Dist", min: 0.05, max: 4000, defaultValue: 6, step: 0.01 },
   { key: "aaJitter", label: "AA Jitter", min: 0, max: 2, defaultValue: 1, step: 0.01 }
@@ -180,23 +208,40 @@ uniform float uIntegrator_fudgeFactor;
 uniform float uIntegrator_aoStrength;
 uniform int uIntegrator_aoSamples;
 uniform float uIntegrator_shadowStrength;
+uniform float uIntegrator_shadowSoftness;
 uniform float uIntegrator_fog;
 uniform float uIntegrator_backgroundStrength;
+uniform float uIntegrator_sunAzimuth;
+uniform float uIntegrator_sunElevation;
 
 uniform float uIntegrator_diffuseColorR;
 uniform float uIntegrator_diffuseColorG;
 uniform float uIntegrator_diffuseColorB;
 uniform int uIntegrator_useOrbitTrap;
 uniform float uIntegrator_orbitTrapFalloff;
+uniform float uIntegrator_orbitTrapHueOffset;
+uniform float uIntegrator_orbitTrapHueScale;
+uniform float uIntegrator_orbitTrapSaturation;
+uniform float uIntegrator_orbitTrapValue;
+uniform float uIntegrator_orbitTrapMix;
 uniform float uIntegrator_metalness;
 uniform float uIntegrator_roughness;
 uniform float uIntegrator_sunStrength;
 uniform float uIntegrator_ambientStrength;
 uniform float uIntegrator_specularStrength;
+uniform float uIntegrator_sssStrength;
+uniform float uIntegrator_sssRadius;
 
 const int MAX_TRACE_STEPS = 1024;
 const int MAX_AO_SAMPLES = 8;
 const float PI_SURFACE = 3.141592653589793;
+
+vec3 computeSunDirection() {
+  float az = radians(uIntegrator_sunAzimuth);
+  float el = radians(uIntegrator_sunElevation);
+  float cosEl = cos(el);
+  return normalize(vec3(sin(az) * cosEl, sin(el), cos(az) * cosEl));
+}
 
 float baseEpsilon() {
   return max(pow(10.0, uIntegrator_detailExp), 1.0e-6);
@@ -220,6 +265,7 @@ vec3 estimateNormalDE(vec3 p, float t) {
 
 bool tracePrimary(vec3 ro, vec3 rd, out float hitT) {
   float t = 0.0;
+  float prevT = 0.0;
 
   for (int i = 0; i < MAX_TRACE_STEPS; i++) {
     if (i >= uIntegrator_maxRaySteps) {
@@ -230,10 +276,21 @@ bool tracePrimary(vec3 ro, vec3 rd, out float hitT) {
     float eps = hitEpsilon(t);
     float d = fragmentariumWebDETrace(p) * uIntegrator_fudgeFactor;
     if (d < eps) {
-      hitT = t;
+      float lo = prevT;
+      float hi = t;
+      for (int b = 0; b < 4; b++) {
+        float mid = 0.5 * (lo + hi);
+        if (fragmentariumWebDESample(ro + rd * mid) * uIntegrator_fudgeFactor < hitEpsilon(mid)) {
+          hi = mid;
+        } else {
+          lo = mid;
+        }
+      }
+      hitT = hi;
       return true;
     }
 
+    prevT = t;
     t += d;
     if (t > float(uIntegrator_maxDistance)) {
       break;
@@ -259,7 +316,10 @@ float traceShadow(vec3 ro, vec3 rd, float startT) {
     if (d < eps) {
       return 0.0;
     }
-    visibility = min(visibility, 12.0 * d / max(t, 1.0e-5));
+    visibility = min(visibility, uIntegrator_shadowSoftness * d / max(t, 1.0e-5));
+    if (visibility < 0.01) {
+      return 0.0;
+    }
     t += max(d, eps * 0.5);
     if (t > float(uIntegrator_maxDistance)) {
       break;
@@ -293,6 +353,19 @@ float ambientOcclusion(vec3 p, vec3 n) {
 vec3 hsv2rgb(vec3 c) {
   vec3 p = abs(fract(c.xxx + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
   return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
+}
+
+vec3 applyOrbitTrapHueBlend(vec3 baseColor) {
+  if (uIntegrator_useOrbitTrap <= 0) {
+    return baseColor;
+  }
+  float trapVal = fragmentariumWebOrbitTrapValue(uIntegrator_orbitTrapFalloff);
+  float hue = fract(uIntegrator_orbitTrapHueOffset + trapVal * uIntegrator_orbitTrapHueScale);
+  float saturation = clamp(uIntegrator_orbitTrapSaturation, 0.0, 1.0);
+  float value = max(uIntegrator_orbitTrapValue, 0.0);
+  vec3 trapHue = hsv2rgb(vec3(hue, saturation, value));
+  float mixAmount = clamp(trapVal * clamp(uIntegrator_orbitTrapMix, 0.0, 1.0), 0.0, 1.0);
+  return mix(baseColor, trapHue, mixAmount);
 }
 
 vec3 backgroundColor(vec3 rd) {
@@ -329,14 +402,7 @@ vec3 materialBaseColor() {
     vec3(0.0),
     vec3(1.0)
   );
-
-  if (uIntegrator_useOrbitTrap > 0) {
-    float trapVal = fragmentariumWebOrbitTrapValue(uIntegrator_orbitTrapFalloff);
-    vec3 trapHue = hsv2rgb(vec3(trapVal, 1.0, 1.0));
-    diffuseColor = mix(diffuseColor, trapHue, trapVal);
-  }
-
-  return diffuseColor;
+  return applyOrbitTrapHueBlend(diffuseColor);
 }
 
 vec3 renderColor(vec3 ro, vec3 rd) {
@@ -361,7 +427,7 @@ vec3 renderColor(vec3 ro, vec3 rd) {
   float r = clamp(uIntegrator_roughness, 0.0, 1.0);
   float alphaR = max(1.0e-3, r * r);
 
-  vec3 sunDir = normalize(vec3(0.6, 0.7, 0.2));
+  vec3 sunDir = computeSunDirection();
   vec3 sunRadiance = vec3(1.0, 0.97, 0.92) * uIntegrator_sunStrength;
   float nDotL = max(dot(n, sunDir), 0.0);
   float shadow = traceShadow(p + n * eps * 2.0, sunDir, eps * 4.0);
@@ -395,6 +461,13 @@ vec3 renderColor(vec3 ro, vec3 rd) {
 
   vec3 lit = direct + (ambientDiffuse + ambientSpecular) * ao;
 
+  if (uIntegrator_sssStrength > 0.0) {
+    float thickness = clamp(fragmentariumWebDESample(p - n * uIntegrator_sssRadius), 0.0, 1.0);
+    float sssAmount = (1.0 - thickness) * max(dot(sunDir, -n) * 0.5 + 0.5, 0.0);
+    vec3 sssColor = baseCol * sunRadiance * sssAmount * uIntegrator_sssStrength;
+    lit += sssColor * adjustedShadow;
+  }
+
   float fogDensity = uIntegrator_fog * uIntegrator_fog * 0.0015;
   float fogFactor = 1.0 - exp(-fogDensity * t * t);
   return mix(lit, bg, clamp(fogFactor, 0.0, 1.0));
@@ -410,13 +483,21 @@ const deQualityOptionTemplate: IntegratorOptionDefinition[] = [
   { key: "aoStrength", label: "AO Strength", min: 0, max: 2, defaultValue: 0.55, step: 0.01 },
   { key: "aoSamples", label: "AO Samples", min: 0, max: 8, defaultValue: 5, step: 1 },
   { key: "shadowStrength", label: "Shadow Strength", min: 0, max: 1, defaultValue: 0.65, step: 0.01 },
+  { key: "shadowSoftness", label: "Shadow Softness", min: 1, max: 100, defaultValue: 12, step: 0.1 },
   { key: "fog", label: "Fog", min: 0, max: 2, defaultValue: 0.2, step: 0.01 },
   { key: "backgroundStrength", label: "Background", min: 0, max: 1, defaultValue: 0.2, step: 0.01 },
+  { key: "sunAzimuth", label: "Sun Azimuth", min: 0, max: 360, defaultValue: 20, step: 0.1 },
+  { key: "sunElevation", label: "Sun Elevation", min: -10, max: 90, defaultValue: 45, step: 0.1 },
   { key: "diffuseColorR", label: "Diffuse R", min: 0, max: 1, defaultValue: 0.9, step: 0.01 },
   { key: "diffuseColorG", label: "Diffuse G", min: 0, max: 1, defaultValue: 0.82, step: 0.01 },
   { key: "diffuseColorB", label: "Diffuse B", min: 0, max: 1, defaultValue: 0.72, step: 0.01 },
   { key: "useOrbitTrap", label: "Use Orbit Trap", min: 0, max: 1, defaultValue: 1, step: 1 },
   { key: "orbitTrapFalloff", label: "Trap Falloff", min: 0.1, max: 24, defaultValue: 5.5, step: 0.01 },
+  { key: "orbitTrapHueOffset", label: "Trap Hue Shift", min: -1, max: 1, defaultValue: 0, step: 0.01 },
+  { key: "orbitTrapHueScale", label: "Trap Hue Scale", min: -8, max: 8, defaultValue: 1, step: 0.01 },
+  { key: "orbitTrapSaturation", label: "Trap Saturation", min: 0, max: 1, defaultValue: 1, step: 0.01 },
+  { key: "orbitTrapValue", label: "Trap Value", min: 0, max: 2, defaultValue: 1, step: 0.01 },
+  { key: "orbitTrapMix", label: "Trap Mix", min: 0, max: 1, defaultValue: 1, step: 0.01 },
   { key: "metalness", label: "Metalness", min: 0, max: 1, defaultValue: 0.05, step: 0.01 },
   { key: "roughness", label: "Roughness", min: 0, max: 1, defaultValue: 0.35, step: 0.01 },
   { key: "aperture", label: "Aperture", min: 0, max: 0.2, defaultValue: 0, step: 0.0001 },
@@ -424,10 +505,13 @@ const deQualityOptionTemplate: IntegratorOptionDefinition[] = [
   { key: "aaJitter", label: "AA Jitter", min: 0, max: 2, defaultValue: 1, step: 0.01 },
   { key: "sunStrength", label: "Sun Strength", min: 0, max: 20, defaultValue: 4.5, step: 0.01 },
   { key: "ambientStrength", label: "Ambient", min: 0, max: 3, defaultValue: 0.8, step: 0.01 },
-  { key: "specularStrength", label: "Specular", min: 0, max: 3, defaultValue: 1.0, step: 0.01 }
+  { key: "specularStrength", label: "Specular", min: 0, max: 3, defaultValue: 1.0, step: 0.01 },
+  { key: "sssStrength", label: "SSS Strength", min: 0, max: 2, defaultValue: 0, step: 0.01 },
+  { key: "sssRadius", label: "SSS Radius", min: 0.001, max: 1, defaultValue: 0.1, step: 0.001 }
 ];
 
 const dePathTracerPhysicalGlsl = `
+#define FRAGMENTARIUM_WEB_HAS_PCG_RNG
 uniform float uIntegrator_detailExp;
 uniform int uIntegrator_maxRaySteps;
 uniform float uIntegrator_fudgeFactor;
@@ -438,6 +522,11 @@ uniform float uIntegrator_metallic;
 uniform float uIntegrator_reflectivity;
 uniform int uIntegrator_useOrbitTrap;
 uniform float uIntegrator_orbitTrapFalloff;
+uniform float uIntegrator_orbitTrapHueOffset;
+uniform float uIntegrator_orbitTrapHueScale;
+uniform float uIntegrator_orbitTrapSaturation;
+uniform float uIntegrator_orbitTrapValue;
+uniform float uIntegrator_orbitTrapMix;
 uniform int uIntegrator_directLight;
 uniform float uIntegrator_sunStrength;
 uniform float uIntegrator_skyStrength;
@@ -453,18 +542,32 @@ uniform float uIntegrator_areaLightColorG;
 uniform float uIntegrator_areaLightColorB;
 uniform int uIntegrator_maxDistance;
 uniform float uIntegrator_sampleClamp;
+uniform float uIntegrator_sunAzimuth;
+uniform float uIntegrator_sunElevation;
 
 const int MAX_TRACE_STEPS = 1536;
 const int MAX_BOUNCES = 16;
 const float PI = 3.141592653589793;
 const float INV_PI = 0.3183098861837907;
 
+vec3 computeSunDirection() {
+  float az = radians(uIntegrator_sunAzimuth);
+  float el = radians(uIntegrator_sunElevation);
+  float cosEl = cos(el);
+  return normalize(vec3(sin(az) * cosEl, sin(el), cos(az) * cosEl));
+}
+
 float minDistPTPhys() {
   return max(pow(10.0, uIntegrator_detailExp), 1.0e-6);
 }
 
-vec3 estimateNormalPTPhys(vec3 p) {
-  float e = max(minDistPTPhys() * 0.5, 1.0e-6);
+float hitEpsilonPT(float t) {
+  float eps = minDistPTPhys();
+  return max(eps, eps * 0.01 * t);
+}
+
+vec3 estimateNormalPTPhys(vec3 p, float t) {
+  float e = max(hitEpsilonPT(t) * 0.5, 1.0e-6);
   vec2 k = vec2(1.0, -1.0);
   return normalize(
     k.xyy * fragmentariumWebDESample(p + k.xyy * e) +
@@ -551,6 +654,19 @@ vec3 hsv2rgb(vec3 c) {
   return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
 }
 
+vec3 applyOrbitTrapHueBlendPT(vec3 baseColor) {
+  if (uIntegrator_useOrbitTrap <= 0) {
+    return baseColor;
+  }
+  float trapVal = fragmentariumWebOrbitTrapValue(uIntegrator_orbitTrapFalloff);
+  float hue = fract(uIntegrator_orbitTrapHueOffset + trapVal * uIntegrator_orbitTrapHueScale);
+  float saturation = clamp(uIntegrator_orbitTrapSaturation, 0.0, 1.0);
+  float value = max(uIntegrator_orbitTrapValue, 0.0);
+  vec3 trapHue = hsv2rgb(vec3(hue, saturation, value));
+  float mixAmount = clamp(trapVal * clamp(uIntegrator_orbitTrapMix, 0.0, 1.0), 0.0, 1.0);
+  return mix(baseColor, trapHue, mixAmount);
+}
+
 vec3 fresnelSchlick(float cosTheta, vec3 f0) {
   return f0 + (vec3(1.0) - f0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
@@ -603,21 +719,34 @@ void evaluateBSDF(
 
 bool traceDE(vec3 ro, vec3 rd, out vec3 hitPos, out vec3 hitNormal, out float hitT) {
   float t = 0.0;
-  float eps = minDistPTPhys();
+  float prevT = 0.0;
   for (int i = 0; i < MAX_TRACE_STEPS; i++) {
     if (i >= uIntegrator_maxRaySteps) {
       break;
     }
 
     vec3 p = ro + rd * t;
+    float eps = hitEpsilonPT(t);
     float d = fragmentariumWebDETrace(p) * uIntegrator_fudgeFactor;
     if (d < eps) {
-      hitPos = p;
-      hitNormal = estimateNormalPTPhys(p);
+      float lo = prevT;
+      float hi = t;
+      for (int b = 0; b < 4; b++) {
+        float mid = 0.5 * (lo + hi);
+        if (fragmentariumWebDESample(ro + rd * mid) * uIntegrator_fudgeFactor < hitEpsilonPT(mid)) {
+          hi = mid;
+        } else {
+          lo = mid;
+        }
+      }
+      t = hi;
+      hitPos = ro + rd * t;
+      hitNormal = estimateNormalPTPhys(hitPos, t);
       hitT = t;
       return true;
     }
 
+    prevT = t;
     t += d;
     if (t > float(uIntegrator_maxDistance)) {
       break;
@@ -631,9 +760,9 @@ bool traceDE(vec3 ro, vec3 rd, out vec3 hitPos, out vec3 hitNormal, out float hi
 }
 
 float traceVisibility(vec3 ro, vec3 rd, float maxDistance) {
-  float t = minDistPTPhys() * 4.0;
-  float eps = minDistPTPhys();
-  int shadowSteps = max(8, uIntegrator_maxRaySteps / 3);
+  float baseEps = minDistPTPhys();
+  float t = baseEps * 4.0;
+  int shadowSteps = max(8, uIntegrator_maxRaySteps / 2);
 
   for (int i = 0; i < MAX_TRACE_STEPS; i++) {
     if (i >= shadowSteps) {
@@ -641,7 +770,8 @@ float traceVisibility(vec3 ro, vec3 rd, float maxDistance) {
     }
 
     vec3 p = ro + rd * t;
-    float d = fragmentariumWebDESample(p) * uIntegrator_fudgeFactor;
+    float eps = hitEpsilonPT(t);
+    float d = fragmentariumWebDESample(p) * uIntegrator_fudgeFactor * 1.2;
     if (d < eps) {
       return 0.0;
     }
@@ -655,7 +785,7 @@ float traceVisibility(vec3 ro, vec3 rd, float maxDistance) {
 }
 
 vec3 sunDirectionPT() {
-  return normalize(vec3(0.6, 0.7, 0.2));
+  return computeSunDirection();
 }
 
 float sunCosThetaMaxPT() {
@@ -781,6 +911,7 @@ vec3 renderColor(vec3 ro, vec3 rd) {
   vec3 radiance = vec3(0.0);
   vec3 origin = ro;
   vec3 direction = normalize(rd);
+  float lastPdf = 0.0;
 
   for (int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
     if (bounce >= uIntegrator_bounceCount) {
@@ -793,22 +924,55 @@ vec3 renderColor(vec3 ro, vec3 rd) {
     bool hit = traceDE(origin, direction, hitPos, hitNormal, hitT);
     if (!hit) {
       vec3 env = skyRadiance(direction);
-      bool includeSun = (uIntegrator_directLight == 0) || (bounce == 0);
-      if (includeSun) {
-        env += sunRadiance(direction);
+
+      vec3 sunContrib = sunRadiance(direction);
+      if (uIntegrator_directLight > 0 && bounce > 0 && lastPdf > 0.0) {
+        float cosThetaMax = sunCosThetaMaxPT();
+        float sunOmega = 2.0 * PI * (1.0 - cosThetaMax);
+        float pdfLight = 1.0 / max(sunOmega, 1.0e-6);
+        float w = powerHeuristic(lastPdf, pdfLight);
+        env += sunContrib * w;
+      } else {
+        env += sunContrib;
       }
+
+      if (uIntegrator_directLight > 0 && uIntegrator_areaLightEnabled > 0 && bounce > 0 && lastPdf > 0.0) {
+        vec3 alDir, alRight, alUp;
+        cameraBasisPT(alDir, alRight, alUp);
+        vec3 alCenter = uEye + alRight * uIntegrator_areaLightOffsetX
+                             + alUp * uIntegrator_areaLightOffsetY
+                             + alDir * uIntegrator_areaLightOffsetZ;
+        float denom = dot(alDir, direction);
+        if (abs(denom) > 1.0e-6) {
+          float tLight = dot(alCenter - origin, alDir) / denom;
+          if (tLight > 0.0) {
+            vec3 hitLight = origin + direction * tLight;
+            vec3 alOffset = hitLight - alCenter;
+            float halfSize = max(uIntegrator_areaLightSize, 1.0e-4);
+            float u = dot(alOffset, alRight);
+            float v = dot(alOffset, alUp);
+            if (abs(u) <= halfSize && abs(v) <= halfSize) {
+              float area = (2.0 * halfSize) * (2.0 * halfSize);
+              float pdfArea = 1.0 / max(area, 1.0e-6);
+              float distSq = tLight * tLight;
+              float lightCos = abs(denom);
+              float pdfAreaSolid = pdfArea * distSq / max(lightCos, 1.0e-6);
+              float w = powerHeuristic(lastPdf, pdfAreaSolid);
+              env += areaLightRadiancePT() * w;
+            }
+          }
+        }
+      }
+
       radiance += throughput * env;
       break;
     }
 
+    float surfaceEps = hitEpsilonPT(hitT);
     vec3 n = hitNormal;
     vec3 v = normalize(-direction);
     vec3 base = clamp(fragmentariumResolveBaseColor(hitPos, n), vec3(0.0), vec3(1.0));
-    if (uIntegrator_useOrbitTrap > 0) {
-      float trapVal = fragmentariumWebOrbitTrapValue(uIntegrator_orbitTrapFalloff);
-      vec3 trapHue = hsv2rgb(vec3(trapVal, 1.0, 1.0));
-      base = mix(base, trapHue, trapVal);
-    }
+    base = applyOrbitTrapHueBlendPT(base);
     float roughness = clamp(uIntegrator_roughness, 0.02, 1.0);
     float metallic = clamp(uIntegrator_metallic, 0.0, 1.0);
     float reflectivity = clamp(uIntegrator_reflectivity, 0.0, 1.0);
@@ -818,7 +982,7 @@ vec3 renderColor(vec3 ro, vec3 rd) {
       vec3 lSun = sampleSunDirection(rng, pdfLight);
       float nDotLSun = max(dot(n, lSun), 0.0);
       if (nDotLSun > 0.0) {
-        float vis = traceVisibility(hitPos + n * minDistPTPhys() * 6.0, lSun, float(uIntegrator_maxDistance));
+        float vis = traceVisibility(hitPos + n * surfaceEps * 6.0, lSun, float(uIntegrator_maxDistance));
         if (vis > 0.0) {
           vec3 fSun;
           float pdfBsdfSun;
@@ -843,8 +1007,8 @@ vec3 renderColor(vec3 ro, vec3 rd) {
           float nDotLArea = max(dot(n, lArea), 0.0);
           float lightCos = max(dot(lightNormal, -lArea), 0.0);
           if (nDotLArea > 0.0 && lightCos > 0.0) {
-            float maxShadowDistance = max(dist - minDistPTPhys() * 8.0, minDistPTPhys() * 8.0);
-            float vis = traceVisibility(hitPos + n * minDistPTPhys() * 6.0, lArea, maxShadowDistance);
+            float maxShadowDistance = max(dist - surfaceEps * 8.0, surfaceEps * 8.0);
+            float vis = traceVisibility(hitPos + n * surfaceEps * 6.0, lArea, maxShadowDistance);
             if (vis > 0.0) {
               vec3 fArea;
               float pdfBsdfArea;
@@ -884,7 +1048,8 @@ vec3 renderColor(vec3 ro, vec3 rd) {
     }
 
     throughput *= (f * nDotL / pdf) * uIntegrator_albedo;
-    origin = hitPos + n * (minDistPTPhys() * 6.0);
+    lastPdf = pdf;
+    origin = hitPos + n * (surfaceEps * 6.0);
     direction = wi;
 
     if (bounce >= 2) {
@@ -935,14 +1100,21 @@ export const INTEGRATORS: IntegratorDefinition[] = [
       { key: "detailExp", label: "Detail", min: -7, max: 0, defaultValue: -2.7, step: 0.01 },
       { key: "maxRaySteps", label: "Max Steps", min: 16, max: 1536, defaultValue: 200, step: 1 },
       { key: "fudgeFactor", label: "Fudge Factor", min: 0.25, max: 2, defaultValue: 1, step: 0.01 },
-      { key: "bounceCount", label: "Bounces", min: 1, max: 16, defaultValue: 6, step: 1 },
+      { key: "bounceCount", label: "Bounces", min: 1, max: 16, defaultValue: 3, step: 1 },
       { key: "albedo", label: "Albedo", min: 0, max: 1, defaultValue: 1, step: 0.01 },
       { key: "roughness", label: "Roughness", min: 0.02, max: 1, defaultValue: 0.35, step: 0.01 },
       { key: "metallic", label: "Metallic", min: 0, max: 1, defaultValue: 0, step: 0.01 },
       { key: "reflectivity", label: "Reflectivity", min: 0, max: 1, defaultValue: 0.5, step: 0.01 },
       { key: "useOrbitTrap", label: "Use Orbit Trap", min: 0, max: 1, defaultValue: 1, step: 1 },
       { key: "orbitTrapFalloff", label: "Trap Falloff", min: 0.1, max: 24, defaultValue: 5.5, step: 0.01 },
+      { key: "orbitTrapHueOffset", label: "Trap Hue Shift", min: -1, max: 1, defaultValue: 0, step: 0.01 },
+      { key: "orbitTrapHueScale", label: "Trap Hue Scale", min: -8, max: 8, defaultValue: 1, step: 0.01 },
+      { key: "orbitTrapSaturation", label: "Trap Saturation", min: 0, max: 1, defaultValue: 1, step: 0.01 },
+      { key: "orbitTrapValue", label: "Trap Value", min: 0, max: 2, defaultValue: 1, step: 0.01 },
+      { key: "orbitTrapMix", label: "Trap Mix", min: 0, max: 1, defaultValue: 1, step: 0.01 },
       { key: "directLight", label: "Direct Light", min: 0, max: 1, defaultValue: 1, step: 1 },
+      { key: "sunAzimuth", label: "Sun Azimuth", min: 0, max: 360, defaultValue: 20, step: 0.1 },
+      { key: "sunElevation", label: "Sun Elevation", min: -10, max: 90, defaultValue: 45, step: 0.1 },
       { key: "sunStrength", label: "Sun Strength", min: 0, max: 20, defaultValue: 6, step: 0.01 },
       { key: "skyStrength", label: "Sky Strength", min: 0, max: 5, defaultValue: 1, step: 0.01 },
       {
@@ -966,7 +1138,7 @@ export const INTEGRATORS: IntegratorDefinition[] = [
       { key: "focalDistance", label: "Focal Dist", min: 0.05, max: 4000, defaultValue: 6, step: 0.01 },
       { key: "aaJitter", label: "AA Jitter", min: 0, max: 2, defaultValue: 1, step: 0.01 },
       { key: "maxDistance", label: "Max Distance", min: 50, max: 5000, defaultValue: 1500, step: 1 },
-      { key: "sampleClamp", label: "Sample Clamp", min: 0, max: 64, defaultValue: 0, step: 0.1 }
+      { key: "sampleClamp", label: "Sample Clamp", min: 0, max: 64, defaultValue: 3.0, step: 0.1 }
     ],
     glsl: dePathTracerPhysicalGlsl
   }
