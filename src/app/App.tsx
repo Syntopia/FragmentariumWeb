@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DefinitionEditor } from "../components/DefinitionEditor";
+import { ConfirmDeleteLocalSystemDialog } from "../components/ConfirmDeleteLocalSystemDialog";
 import { SaveLocalSystemDialog } from "../components/SaveLocalSystemDialog";
 import { SplitLayout } from "../components/SplitLayout";
 import {
@@ -8,6 +9,7 @@ import {
   type SystemsTreeNode
 } from "../components/SystemsTreeView";
 import { UniformPanel } from "../components/UniformPanel";
+import { VerticalSplitLayout } from "../components/VerticalSplitLayout";
 import { VerticalTabList, type VerticalTabItem } from "../components/VerticalTabList";
 import { ViewportPane } from "../components/ViewportPane";
 import { type CameraState } from "../core/geometry/camera";
@@ -30,18 +32,32 @@ import {
   parseSettingsClipboardPayload,
   serializeSettingsClipboardPayload
 } from "./settingsClipboard";
+import { getUniformGroupNames, normalizeUniformGroupName } from "./uniformGroups";
 
 const MIN_PANE_WIDTH = 240;
+const MIN_LEFT_SECTION_HEIGHT = 140;
 const LEGACY_INTEGRATOR_ID_MAP: Record<string, string> = {
   "de-pathtracer": "de-pathtracer-physical"
 };
-const RIGHT_PANE_TABS: VerticalTabItem[] = [
+const STATIC_RIGHT_PANE_TABS: VerticalTabItem[] = [
   { id: "integrator", label: "Raytracer" },
   { id: "render", label: "Render" },
-  { id: "post", label: "Post" },
-  { id: "uniforms", label: "Parameters" }
+  { id: "post", label: "Post" }
 ];
-type RightPaneTabId = "integrator" | "render" | "post" | "uniforms";
+const UNIFORM_GROUP_TAB_PREFIX = "uniform-group:";
+type RightPaneTabId = string;
+
+function makeUniformGroupTabId(group: string): string {
+  return `${UNIFORM_GROUP_TAB_PREFIX}${group}`;
+}
+
+function parseUniformGroupFromTabId(tabId: string): string | null {
+  if (!tabId.startsWith(UNIFORM_GROUP_TAB_PREFIX)) {
+    return null;
+  }
+  const value = tabId.slice(UNIFORM_GROUP_TAB_PREFIX.length);
+  return value.length > 0 ? value : null;
+}
 
 const defaultCamera: CameraState = {
   eye: [0, 0, -6],
@@ -53,6 +69,7 @@ const defaultCamera: CameraState = {
 interface InitialState {
   leftPanePx: number;
   rightPanePx: number;
+  leftSystemsPaneHeightPx: number;
   selectedSystemKey: string;
   activeIntegratorId: string;
   localSystemsByPath: Record<string, string>;
@@ -67,6 +84,7 @@ interface InitialState {
 interface LegacyPersistedState {
   leftPanePx?: number;
   rightPanePx?: number;
+  leftSystemsPaneHeightPx?: number;
   selectedSystemId?: string;
   selectedSystemKey?: string;
   activeIntegratorId?: string;
@@ -206,6 +224,7 @@ function buildInitialState(): InitialState {
   const defaults: InitialState = {
     leftPanePx: 380,
     rightPanePx: 380,
+    leftSystemsPaneHeightPx: 220,
     selectedSystemKey: fallbackSelectionKey,
     activeIntegratorId: INTEGRATORS[0].id,
     localSystemsByPath: {},
@@ -250,6 +269,7 @@ function buildInitialState(): InitialState {
       ...defaults,
       leftPanePx: legacy.leftPanePx ?? defaults.leftPanePx,
       rightPanePx: legacy.rightPanePx ?? defaults.rightPanePx,
+      leftSystemsPaneHeightPx: legacy.leftSystemsPaneHeightPx ?? defaults.leftSystemsPaneHeightPx,
       selectedSystemKey: isKnownSelectionKey(migratedSelectedKey, localSystemsByPath)
         ? migratedSelectedKey
         : defaults.selectedSystemKey,
@@ -536,6 +556,7 @@ export function App(): JSX.Element {
 
   const [leftPanePx, setLeftPanePx] = useState(initial.leftPanePx);
   const [rightPanePx, setRightPanePx] = useState(initial.rightPanePx);
+  const [leftSystemsPaneHeightPx, setLeftSystemsPaneHeightPx] = useState(initial.leftSystemsPaneHeightPx);
   const [selectedSystemKey, setSelectedSystemKey] = useState(initial.selectedSystemKey);
   const [activeIntegratorId, setActiveIntegratorId] = useState(initial.activeIntegratorId);
 
@@ -545,9 +566,11 @@ export function App(): JSX.Element {
   const [cameraBySystem, setCameraBySystem] = useState(initial.cameraBySystem);
   const [integratorOptionsById, setIntegratorOptionsById] = useState(initial.integratorOptionsById);
   const [renderSettings, setRenderSettings] = useState(initial.renderSettings);
-  const [activeRightPaneTab, setActiveRightPaneTab] = useState<RightPaneTabId>("uniforms");
+  const [activeRightPaneTab, setActiveRightPaneTab] = useState<RightPaneTabId>("integrator");
   const [settingsClipboardStatus, setSettingsClipboardStatus] = useState<string | null>(null);
   const [saveLocalDialog, setSaveLocalDialog] = useState<SaveLocalDialogState | null>(null);
+  const [deleteLocalDialogPath, setDeleteLocalDialogPath] = useState<string | null>(null);
+  const [activeUniformGroupBySystem, setActiveUniformGroupBySystem] = useState<Record<string, string>>({});
 
   const [parsedBySystem, setParsedBySystem] = useState<Record<string, ParseResult>>({});
   const [activePresetBySystem, setActivePresetBySystem] = useState<Record<string, string>>({});
@@ -568,13 +591,6 @@ export function App(): JSX.Element {
   const selectedLocalPath = parseLocalPathFromKey(selectedSystemKey);
   const selectedPresetSystem = selectedPresetId !== null ? findPresetSystemById(selectedPresetId) : null;
 
-  const selectedSystemName =
-    selectedPresetSystem !== null
-      ? selectedPresetSystem.name
-      : selectedLocalPath !== null
-        ? `Local/${selectedLocalPath}`
-        : "Unknown";
-
   const baselineSource = getBaselineSourceForEntry(selectedSystemKey, localSystemsByPath);
   const sourceDraft = editorSourceBySystem[selectedSystemKey] ?? baselineSource;
   const parseResult = parsedBySystem[selectedSystemKey] ?? null;
@@ -586,6 +602,32 @@ export function App(): JSX.Element {
   const uniformValues = parseResult
     ? uniformValuesBySystem[selectedSystemKey] ?? getDefaultUniformValues(parseResult.uniforms)
     : {};
+  const uniformGroups = parseResult !== null ? getUniformGroupNames(parseResult.uniforms) : [];
+  const activeUniformGroupFromTab = parseUniformGroupFromTabId(activeRightPaneTab);
+  const selectedUniformGroup =
+    uniformGroups.length === 0
+      ? null
+      : activeUniformGroupFromTab !== null && uniformGroups.includes(activeUniformGroupFromTab)
+        ? activeUniformGroupFromTab
+        : uniformGroups.includes(activeUniformGroupBySystem[selectedSystemKey] ?? "")
+        ? (activeUniformGroupBySystem[selectedSystemKey] as string)
+        : uniformGroups[0];
+  const visibleUniforms =
+    parseResult === null || selectedUniformGroup === null
+      ? []
+      : parseResult.uniforms.filter(
+          (uniform) => normalizeUniformGroupName(uniform.group) === selectedUniformGroup
+        );
+  const rightPaneTabs: VerticalTabItem[] = useMemo(
+    () => [
+      ...STATIC_RIGHT_PANE_TABS,
+      ...uniformGroups.map((group) => ({
+        id: makeUniformGroupTabId(group),
+        label: group
+      }))
+    ],
+    [uniformGroups]
+  );
 
   const cameraState = cameraBySystem[selectedSystemKey] ?? defaultCamera;
   const hasSourceChanges = sourceDraft !== baselineSource;
@@ -678,6 +720,36 @@ export function App(): JSX.Element {
   ]);
 
   useEffect(() => {
+    if (uniformGroups.length === 0 || selectedUniformGroup === null) {
+      return;
+    }
+    if (activeUniformGroupBySystem[selectedSystemKey] === selectedUniformGroup) {
+      return;
+    }
+    setActiveUniformGroupBySystem((prev) => ({
+      ...prev,
+      [selectedSystemKey]: selectedUniformGroup
+    }));
+  }, [
+    activeUniformGroupBySystem,
+    selectedSystemKey,
+    selectedUniformGroup,
+    uniformGroups
+  ]);
+
+  useEffect(() => {
+    const hasActiveTab = rightPaneTabs.some((tab) => tab.id === activeRightPaneTab);
+    if (hasActiveTab) {
+      return;
+    }
+    if (selectedUniformGroup !== null) {
+      setActiveRightPaneTab(makeUniformGroupTabId(selectedUniformGroup));
+      return;
+    }
+    setActiveRightPaneTab(STATIC_RIGHT_PANE_TABS[0].id);
+  }, [activeRightPaneTab, rightPaneTabs, selectedUniformGroup]);
+
+  useEffect(() => {
     if (!isKnownSelectionKey(selectedSystemKey, localSystemsByPath)) {
       setSelectedSystemKey(makePresetEntryKey(FRACTAL_SYSTEMS[0].id));
     }
@@ -687,6 +759,7 @@ export function App(): JSX.Element {
     const persisted = {
       leftPanePx,
       rightPanePx,
+      leftSystemsPaneHeightPx,
       selectedSystemKey,
       activeIntegratorId,
       localSystemsByPath,
@@ -706,6 +779,7 @@ export function App(): JSX.Element {
     localSystemsByPath,
     renderSettings,
     rightPanePx,
+    leftSystemsPaneHeightPx,
     selectedSystemKey,
     uniformValuesBySystem
   ]);
@@ -949,11 +1023,7 @@ export function App(): JSX.Element {
     setSelectedSystemKey(targetEntryKey);
   };
 
-  const onDeleteLocalSystem = (localPath: string): void => {
-    if (!window.confirm(`Delete local system '${localPath}'?`)) {
-      return;
-    }
-
+  const deleteLocalSystemByPath = (localPath: string): void => {
     const entryKey = makeLocalEntryKey(localPath);
 
     setLocalSystemsByPath((prev) => {
@@ -990,6 +1060,18 @@ export function App(): JSX.Element {
     if (selectedSystemKey === entryKey) {
       setSelectedSystemKey(makePresetEntryKey(FRACTAL_SYSTEMS[0].id));
     }
+  };
+
+  const onDeleteLocalSystem = (localPath: string): void => {
+    setDeleteLocalDialogPath(localPath);
+  };
+
+  const onConfirmDeleteLocalSystem = (): void => {
+    if (deleteLocalDialogPath === null) {
+      return;
+    }
+    deleteLocalSystemByPath(deleteLocalDialogPath);
+    setDeleteLocalDialogPath(null);
   };
 
   const onSaveOrUpdateSource = (): void => {
@@ -1058,37 +1140,46 @@ export function App(): JSX.Element {
   };
 
   const leftPane = (
-    <div className="pane-content left-pane">
-      <section className="section-block">
-        <h2>Systems</h2>
-        <SystemsTreeView
-          nodes={systemsTreeNodes}
-          activeEntryKey={selectedSystemKey}
-          onSelect={onSwitchSystem}
-          onDeleteLocal={onDeleteLocalSystem}
-        />
-      </section>
-
-      <section className="section-block grow">
-        <div className="section-header-row">
-          <h2>Definition</h2>
-          <div className="section-actions">
-            <button type="button" onClick={() => compileSystem(selectedSystemKey)}>
-              Build (F5)
-            </button>
-            <button type="button" onClick={onSaveOrUpdateSource} disabled={!hasSourceChanges}>
-              {saveButtonLabel}
-            </button>
-          </div>
-        </div>
-        <DefinitionEditor
-          value={sourceDraft}
-          onChange={(next) => {
-            setEditorSourceBySystem((prev) => ({ ...prev, [selectedSystemKey]: next }));
-          }}
-          onBuild={() => compileSystem(selectedSystemKey)}
-        />
-      </section>
+    <div className="pane-content left-pane left-pane-content">
+      <VerticalSplitLayout
+        topHeight={leftSystemsPaneHeightPx}
+        minTopHeight={MIN_LEFT_SECTION_HEIGHT}
+        minBottomHeight={MIN_LEFT_SECTION_HEIGHT}
+        onTopHeightChange={setLeftSystemsPaneHeightPx}
+        top={
+          <section className="section-block section-fill">
+            <h2>Systems</h2>
+            <SystemsTreeView
+              nodes={systemsTreeNodes}
+              activeEntryKey={selectedSystemKey}
+              onSelect={onSwitchSystem}
+              onDeleteLocal={onDeleteLocalSystem}
+            />
+          </section>
+        }
+        bottom={
+          <section className="section-block section-fill">
+            <div className="section-header-row">
+              <h2>Definition</h2>
+              <div className="section-actions">
+                <button type="button" onClick={() => compileSystem(selectedSystemKey)}>
+                  Build (F5)
+                </button>
+                <button type="button" onClick={onSaveOrUpdateSource} disabled={!hasSourceChanges}>
+                  {saveButtonLabel}
+                </button>
+              </div>
+            </div>
+            <DefinitionEditor
+              value={sourceDraft}
+              onChange={(next) => {
+                setEditorSourceBySystem((prev) => ({ ...prev, [selectedSystemKey]: next }));
+              }}
+              onBuild={() => compileSystem(selectedSystemKey)}
+            />
+          </section>
+        }
+      />
     </div>
   );
 
@@ -1450,16 +1541,19 @@ export function App(): JSX.Element {
             </>
           ) : null}
 
-          {activeRightPaneTab === "uniforms" ? (
+          {selectedUniformGroup !== null && activeRightPaneTab === makeUniformGroupTabId(selectedUniformGroup) ? (
             <>
-              <h2>Parameters</h2>
               <div className="right-pane-uniforms">
                 {parseResult !== null ? (
-                  <UniformPanel
-                    uniforms={parseResult.uniforms}
-                    values={uniformValues}
-                    onChange={onUniformValueChange}
-                  />
+                  visibleUniforms.length > 0 ? (
+                    <UniformPanel
+                      uniforms={visibleUniforms}
+                      values={uniformValues}
+                      onChange={onUniformValueChange}
+                    />
+                  ) : (
+                    <p className="muted">No parameters in this group.</p>
+                  )
                 ) : (
                   <p className="muted">Compile a system to expose parameters.</p>
                 )}
@@ -1469,14 +1563,13 @@ export function App(): JSX.Element {
         </div>
 
         <VerticalTabList
-          tabs={RIGHT_PANE_TABS}
+          tabs={rightPaneTabs}
           activeTabId={activeRightPaneTab}
-          onChange={(tabId) => setActiveRightPaneTab(tabId as RightPaneTabId)}
+          onChange={(tabId) => setActiveRightPaneTab(tabId)}
         />
       </section>
 
       <section className="section-block">
-        <h2>Clipboard</h2>
         <div className="settings-clipboard-actions">
           <button type="button" onClick={() => void onCopySettingsToClipboard()}>
             Copy to Clipboard
@@ -1494,10 +1587,6 @@ export function App(): JSX.Element {
     <div className="app-root">
       <header className="topbar">
         <div className="topbar-title">Fragmentarium Web</div>
-        <div className="topbar-status">
-          <span>System: {selectedSystemName}</span>
-          <span>Integrator: {activeIntegrator.name}</span>
-        </div>
       </header>
 
       <SplitLayout
@@ -1536,6 +1625,12 @@ export function App(): JSX.Element {
         }
         onCancel={onCancelSaveLocalDialog}
         onSave={onConfirmSaveLocalDialog}
+      />
+      <ConfirmDeleteLocalSystemDialog
+        open={deleteLocalDialogPath !== null}
+        localPath={deleteLocalDialogPath}
+        onCancel={() => setDeleteLocalDialogPath(null)}
+        onConfirm={onConfirmDeleteLocalSystem}
       />
     </div>
   );

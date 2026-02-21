@@ -72,6 +72,8 @@ vec3 powN1(vec3 z, float power, inout float dr) {
 
 const boxCsgSystem = `
 #include "common-camera-3d.frag"
+#include "common-primitives.frag"
+#define HAS_BASE_COLOR
 
 #group Shape
 uniform vec3 BoxSize; slider[(0.2,0.2,0.2),(1.2,1.2,1.2),(4,4,4)]
@@ -85,9 +87,6 @@ uniform float RotationAngle; slider[-180.0,25.0,180.0]
 uniform vec3 BaseA; color[0.85,0.35,0.25]
 uniform vec3 BaseB; color[0.2,0.75,0.95]
 uniform float StripeScale; slider[0.5,3.0,12.0]
-
-#include "common-primitives.frag"
-#define HAS_BASE_COLOR
 
 vec3 baseColor(vec3 p, vec3 n) {
   float stripes = 0.5 + 0.5 * sin((p.x + p.y + p.z) * StripeScale);
@@ -132,6 +131,8 @@ CutoutRadius = 0.7
 
 const boxGridSystem = `
 #include "common-camera-3d.frag"
+#include "common-primitives.frag"
+#define HAS_BASE_COLOR
 
 #group Shape
 uniform float CellSize; slider[0.8,1.8,4.0]
@@ -142,9 +143,6 @@ uniform float Twist; slider[-4.0,1.1,4.0]
 #group Coloring
 uniform vec3 Warm; color[0.95,0.72,0.3]
 uniform vec3 Cold; color[0.15,0.45,0.9]
-
-#include "common-primitives.frag"
-#define HAS_BASE_COLOR
 
 vec3 baseColor(vec3 p, vec3 n) {
   float mixFactor = 0.5 + 0.5 * sin((p.x - p.z) * 2.0 + p.y * 1.2);
@@ -181,6 +179,9 @@ Cold = 0.15,0.45,0.9
 
 const mandelbulbSystem = `
 #include "common-camera-3d.frag"
+#include "common-primitives.frag"
+#include "common-fractal-utils.frag"
+#define HAS_BASE_COLOR
 
 #group Mandelbulb
 uniform int Iterations; slider[2,12,32]
@@ -196,10 +197,6 @@ uniform float RotAngle; slider[-180.0,0.0,180.0]
 uniform vec3 PaletteA; color[0.75,0.5,0.2]
 uniform vec3 PaletteB; color[0.2,0.65,0.95]
 uniform float PaletteShift; slider[-6.0,1.4,6.0]
-
-#include "common-primitives.frag"
-#include "common-fractal-utils.frag"
-#define HAS_BASE_COLOR
 
 vec4 orbitTrap = vec4(1000.0);
 

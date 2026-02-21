@@ -9,31 +9,15 @@ interface UniformPanelProps {
 const vectorLabels = ["X", "Y", "Z", "W"];
 
 export function UniformPanel(props: UniformPanelProps): JSX.Element {
-  const byGroup = new Map<string, UniformDefinition[]>();
-  for (const uniform of props.uniforms) {
-    const group = uniform.group || "Default";
-    if (!byGroup.has(group)) {
-      byGroup.set(group, []);
-    }
-    byGroup.get(group)?.push(uniform);
-  }
-
-  const sortedGroups = [...byGroup.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-
   return (
     <div className="uniform-panel">
-      {sortedGroups.map(([group, uniforms]) => (
-        <section key={group} className="uniform-group">
-          <h3>{group}</h3>
-          {uniforms.map((uniform) => (
-            <UniformControl
-              key={uniform.name}
-              definition={uniform}
-              value={props.values[uniform.name]}
-              onChange={(value) => props.onChange(uniform.name, value)}
-            />
-          ))}
-        </section>
+      {props.uniforms.map((uniform) => (
+        <UniformControl
+          key={uniform.name}
+          definition={uniform}
+          value={props.values[uniform.name]}
+          onChange={(value) => props.onChange(uniform.name, value)}
+        />
       ))}
     </div>
   );

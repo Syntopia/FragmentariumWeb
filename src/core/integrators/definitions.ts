@@ -554,8 +554,8 @@ export const INTEGRATORS: IntegratorDefinition[] = [
     name: "DE Path Tracer (Physical)",
     description: "Corrected path tracer with GGX+Lambert BSDF, MIS sun lighting, and improved energy handling.",
     options: [
-      { key: "detailExp", label: "Detail", min: -7, max: 0, defaultValue: -2.3, step: 0.01 },
-      { key: "maxRaySteps", label: "Max Steps", min: 16, max: 1536, defaultValue: 256, step: 1 },
+      { key: "detailExp", label: "Detail", min: -7, max: 0, defaultValue: -2.7, step: 0.01 },
+      { key: "maxRaySteps", label: "Max Steps", min: 16, max: 1536, defaultValue: 200, step: 1 },
       { key: "fudgeFactor", label: "Fudge Factor", min: 0.25, max: 2, defaultValue: 1, step: 0.01 },
       { key: "bounceCount", label: "Bounces", min: 1, max: 16, defaultValue: 6, step: 1 },
       { key: "albedo", label: "Albedo", min: 0, max: 1, defaultValue: 1, step: 0.01 },

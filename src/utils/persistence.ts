@@ -6,6 +6,7 @@ import type { RenderSettings } from "../core/render/renderer";
 export interface PersistedState {
   leftPanePx: number;
   rightPanePx: number;
+  leftSystemsPaneHeightPx: number;
   selectedSystemKey: string;
   activeIntegratorId: string;
   editorSourceBySystem: Record<string, string>;

@@ -1,5 +1,5 @@
 :root {
-  --bg: #111216;
+  --bg: #222833;
   --panel: #181a1f;
   --panel-2: #1e2128;
   --line: #2c313b;
@@ -39,12 +39,17 @@ textarea {
   height: 100%;
   display: flex;
   flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  background: var(--bg);
 }
 
 .topbar {
-  height: 42px;
-  border-bottom: 1px solid var(--line);
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   background: var(--panel);
+  box-shadow: 0 3px 12px rgba(10, 16, 28, 0.16);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -73,17 +78,19 @@ textarea {
 
 .pane {
   min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(10, 16, 28, 0.14);
+  overflow: hidden;
 }
 
 .pane-left,
 .pane-right {
-  border-right: 1px solid var(--line);
   background: var(--panel);
 }
 
 .pane-right {
-  border-right: none;
-  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
 }
 
 .pane-center {
@@ -97,12 +104,23 @@ textarea {
   width: 8px;
   cursor: col-resize;
   background: transparent;
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
+  position: relative;
 }
 
-.pane-splitter:hover {
-  background: rgba(95, 163, 255, 0.15);
+.pane-splitter::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: #c5d4ee;
+}
+
+.pane-splitter:hover::after {
+  background: var(--accent);
 }
 
 .pane-content {
@@ -114,9 +132,15 @@ textarea {
   padding: 10px;
 }
 
+.left-pane-content {
+  gap: 0;
+}
+
 .section-block {
   border: 1px solid var(--line);
   background: var(--panel-2);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(10, 16, 28, 0.1);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -126,6 +150,49 @@ textarea {
 
 .section-block.grow {
   flex: 1;
+}
+
+.section-fill {
+  height: 100%;
+}
+
+.vertical-split-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.vertical-split-top,
+.vertical-split-bottom {
+  min-height: 0;
+}
+
+.vertical-split-bottom {
+  flex: 1;
+}
+
+.vertical-splitter {
+  height: 8px;
+  cursor: row-resize;
+  background: transparent;
+  position: relative;
+}
+
+.vertical-splitter::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: #c5d4ee;
+}
+
+.vertical-splitter:hover::after {
+  background: var(--accent);
 }
 
 h2,
@@ -256,6 +323,7 @@ h3 {
   height: 100%;
   min-height: 160px;
   border: 1px solid var(--line);
+  border-radius: 6px;
   background: #0f1218;
   overflow: hidden;
 }
@@ -290,6 +358,23 @@ h3 {
   background: transparent;
   color: transparent;
   caret-color: #e8ecf3;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) #1a2231;
+}
+
+.definition-editor-input::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.definition-editor-input::-webkit-scrollbar-track {
+  background: #1a2231;
+}
+
+.definition-editor-input::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 8px;
+  border: 2px solid #1a2231;
 }
 
 .definition-editor-input::selection {
@@ -336,6 +421,23 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) #1a2231;
+}
+
+.systems-tree::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.systems-tree::-webkit-scrollbar-track {
+  background: #1a2231;
+}
+
+.systems-tree::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 8px;
+  border: 2px solid #1a2231;
 }
 
 .systems-tree-node {
@@ -469,9 +571,8 @@ h3 {
   border: 1px solid transparent;
   background: transparent;
   color: var(--muted);
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  transform: rotate(180deg);
+  writing-mode: vertical-lr;
+  text-orientation: sideways;
   font-size: 11px;
   letter-spacing: 0.04em;
   padding: 8px 0;
@@ -491,6 +592,25 @@ h3 {
 .settings-clipboard-actions {
   display: flex;
   gap: 6px;
+}
+
+.uniform-group-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.uniform-group-tab {
+  border: 1px solid var(--line);
+  background: #202531;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 3px 8px;
+}
+
+.uniform-group-tab.is-active {
+  border-color: var(--accent);
+  color: #dcecff;
 }
 
 .settings-clipboard-actions button {
@@ -547,6 +667,12 @@ h3 {
   font-size: 12px;
 }
 
+.modal-actions .button-danger {
+  border-color: #5a3131;
+  background: #2a1a1a;
+  color: #e6b5b5;
+}
+
 .dialog-error {
   font-size: 12px;
   color: var(--danger);
@@ -589,11 +715,29 @@ h3 {
   flex-direction: column;
   gap: 8px;
   overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) #1a2231;
+}
+
+.uniform-panel::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.uniform-panel::-webkit-scrollbar-track {
+  background: #1a2231;
+}
+
+.uniform-panel::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 8px;
+  border: 2px solid #1a2231;
 }
 
 .uniform-group {
   border: 1px solid var(--line);
   background: #181c24;
+  border-radius: 6px;
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -634,6 +778,12 @@ h3 {
 
 .uniform-inputs input[type="range"] {
   width: 100%;
+  accent-color: var(--accent);
+}
+
+.uniform-inputs select {
+  font-size: 11px;
+  padding: 2px 4px;
 }
 
 .uniform-bool {

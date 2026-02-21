@@ -114,6 +114,8 @@ export class FragmentRenderer {
 
   private tileCursor = 0;
 
+  private wasInteracting = false;
+
   private camera: CameraState = {
     eye: [0, 0, -6],
     target: [0, 0, 0],
@@ -198,7 +200,11 @@ export class FragmentRenderer {
       return;
     }
     this.sceneState.uniformValues = { ...values };
-    this.markDirty();
+    if (this.renderSettings.tileCount > 1) {
+      this.notifyInteractionWithoutReset();
+    } else {
+      this.markDirty();
+    }
   }
 
   updateIntegratorOptions(options: IntegratorOptionValues): void {
@@ -206,7 +212,11 @@ export class FragmentRenderer {
       return;
     }
     this.sceneState.integratorOptions = { ...options };
-    this.markDirty();
+    if (this.renderSettings.tileCount > 1) {
+      this.notifyInteractionWithoutReset();
+    } else {
+      this.markDirty();
+    }
   }
 
   setCamera(camera: CameraState): void {
@@ -216,12 +226,23 @@ export class FragmentRenderer {
       up: [...camera.up],
       fov: camera.fov
     };
-    this.notifyInteraction();
+    if (this.renderSettings.tileCount > 1) {
+      this.notifyInteractionWithoutReset();
+    } else {
+      this.notifyInteraction();
+    }
   }
 
   notifyInteraction(): void {
     this.lastInteractionMs = performance.now();
     this.markDirty();
+  }
+
+  private notifyInteractionWithoutReset(): void {
+    this.lastInteractionMs = performance.now();
+    if (this.renderSettings.maxSubframes > 0 && this.subframe >= this.renderSettings.maxSubframes) {
+      this.subframe = 0;
+    }
   }
 
   markDirty(): void {
@@ -309,6 +330,11 @@ export class FragmentRenderer {
     }
 
     const isInteracting = now - this.lastInteractionMs < INTERACTION_WINDOW_MS;
+    if (this.wasInteracting && !isInteracting) {
+      this.markDirty();
+    }
+    this.wasInteracting = isInteracting;
+
     const targetScale = isInteracting ? this.renderSettings.interactionResolutionScale : 1;
     if (Math.abs(targetScale - this.currentScale) > 0.001) {
       this.currentScale = targetScale;
@@ -324,21 +350,44 @@ export class FragmentRenderer {
     }
 
     if (this.dirty) {
-      this.clearRenderTargets();
       this.subframe = 0;
       this.tileCursor = 0;
+
+      if (this.renderSettings.tileCount > 1) {
+        // Seed a complete frame first so tiled updates never start from a black buffer.
+        this.renderScenePass(now, null);
+        this.swapTargets();
+        if (!isInteracting) {
+          // At rest, treat the seeded frame as the first accumulation sample.
+          this.subframe = 1;
+        }
+      } else {
+        this.clearRenderTargets();
+      }
       this.dirty = false;
     }
 
     const canAccumulate =
       this.renderSettings.maxSubframes === 0 || this.subframe < this.renderSettings.maxSubframes;
     if (canAccumulate) {
-      // Tiled updates are stable when the camera is still, but produce visible patch flicker while moving.
-      // During interaction we force full-frame passes and return to tiled accumulation once movement stops.
-      const activeTileCount = isInteracting ? 1 : this.renderSettings.tileCount;
-      const activeTilesPerFrame = isInteracting ? 1 : this.renderSettings.tilesPerFrame;
+      const activeTileCount = this.renderSettings.tileCount;
+      const activeTilesPerFrame = this.renderSettings.tilesPerFrame;
 
-      if (activeTileCount <= 1) {
+      if (isInteracting && activeTileCount > 1) {
+        // Interaction preview mode: update only a subset of tiles and avoid full-buffer copies.
+        const totalTiles = activeTileCount * activeTileCount;
+        const passes = Math.min(activeTilesPerFrame, totalTiles);
+        for (let i = 0; i < passes; i += 1) {
+          const tileRect = this.getTileRect(
+            this.tileCursor,
+            activeTileCount,
+            this.readTarget.width,
+            this.readTarget.height
+          );
+          this.renderScenePassPreview(now, tileRect);
+          this.tileCursor = (this.tileCursor + 1) % totalTiles;
+        }
+      } else if (activeTileCount <= 1) {
         this.renderScenePass(now, null);
         this.swapTargets();
         this.subframe += 1;
@@ -445,6 +494,56 @@ export class FragmentRenderer {
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.readTarget.texture);
+    this.setIntUniform(this.sceneProgram, "uBackbuffer", 0);
+
+    for (const def of this.sceneState.uniformDefinitions) {
+      const value = this.sceneState.uniformValues[def.name];
+      if (value === undefined) {
+        continue;
+      }
+      this.uploadUniform(def.type, def.name, value);
+    }
+
+    for (const option of this.sceneState.integrator.options) {
+      const value = this.sceneState.integratorOptions[option.key];
+      const uniformName = `uIntegrator_${option.key}`;
+      const isInt = option.step === 1 && Number.isInteger(option.defaultValue);
+      if (isInt) {
+        this.setIntUniform(this.sceneProgram, uniformName, Math.trunc(value));
+      } else {
+        this.setFloatUniform(this.sceneProgram, uniformName, value);
+      }
+    }
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  private renderScenePassPreview(now: number, tileRect: TileRect): void {
+    if (this.sceneProgram === null || this.sceneState === null || this.readTarget === null || this.writeTarget === null) {
+      return;
+    }
+
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.readTarget.framebuffer);
+    gl.viewport(0, 0, this.readTarget.width, this.readTarget.height);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(tileRect.x, tileRect.y, tileRect.width, tileRect.height);
+    gl.useProgram(this.sceneProgram);
+
+    this.setVec2Uniform(this.sceneProgram, "uResolution", [this.readTarget.width, this.readTarget.height]);
+    this.setFloatUniform(this.sceneProgram, "uTime", now * 0.001);
+    this.setIntUniform(this.sceneProgram, "uSubframe", 0);
+    this.setBoolUniform(this.sceneProgram, "uUseBackbuffer", 0);
+
+    this.setVec3Uniform(this.sceneProgram, "uEye", this.camera.eye);
+    this.setVec3Uniform(this.sceneProgram, "uTarget", this.camera.target);
+    this.setVec3Uniform(this.sceneProgram, "uUp", this.camera.up);
+    this.setFloatUniform(this.sceneProgram, "uFov", this.camera.fov);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.writeTarget.texture);
     this.setIntUniform(this.sceneProgram, "uBackbuffer", 0);
 
     for (const def of this.sceneState.uniformDefinitions) {

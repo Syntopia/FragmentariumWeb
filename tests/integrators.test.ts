@@ -30,6 +30,8 @@ describe("integrators", () => {
     expect(defaults.roughness).toBe(0.35);
     expect(defaults.sampleClamp).toBe(0);
     expect(defaults.directLight).toBe(1);
+    expect(defaults.detailExp).toBe(-2.7);
+    expect(defaults.maxRaySteps).toBe(200);
   });
 
   test("throws for unknown integrator id", () => {
