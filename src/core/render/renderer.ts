@@ -1,22 +1,48 @@
 import type { CameraState } from "../geometry/camera";
 import type { IntegratorDefinition, IntegratorOptionValues } from "../integrators/types";
-import type { UniformDefinition, UniformValue } from "../parser/types";
+import type { SourceLineRef, UniformDefinition, UniformValue } from "../parser/types";
 import {
   assertWebGl2,
   createProgram,
   createRenderTarget,
   deleteRenderTarget,
+  WebGlShaderCompileError,
   type RenderTarget,
   requireFloatColorBufferSupport
 } from "./glUtils";
+import {
+  formatMappedShaderDiagnostics,
+  mapShaderCompilerDiagnostics,
+  parseShaderCompilerLog,
+  type MappedShaderCompilerDiagnostic
+} from "./shaderDiagnostics";
 import { buildDisplayShaderSources, buildFocusProbeShaderSources, buildSceneShaderSources } from "./shaderComposer";
 
 interface SceneState {
   geometrySource: string;
+  geometryLineMap?: Array<SourceLineRef | null>;
   uniformDefinitions: UniformDefinition[];
   uniformValues: Record<string, UniformValue>;
   integrator: IntegratorDefinition;
   integratorOptions: IntegratorOptionValues;
+}
+
+export interface RendererShaderErrorDetails {
+  stage: "scene" | "focus";
+  shaderKind: "vertex" | "fragment";
+  rawLog: string;
+  diagnostics: MappedShaderCompilerDiagnostic[];
+  message: string;
+}
+
+export class RendererShaderProgramError extends Error {
+  readonly details: RendererShaderErrorDetails;
+
+  constructor(details: RendererShaderErrorDetails) {
+    super(details.message);
+    this.name = "RendererShaderProgramError";
+    this.details = details;
+  }
 }
 
 export interface RendererStatus {
@@ -32,6 +58,25 @@ export interface RendererStatus {
 interface RendererOptions {
   onStatus: (status: RendererStatus) => void;
 }
+
+export interface RendererExportProgress {
+  progress: number;
+  subframe: number;
+  tileCursor: number;
+  totalSubframes: number;
+  tileCount: number;
+}
+
+export interface RenderStillFrameOptions {
+  width: number;
+  height: number;
+  subframes: number;
+  signal?: AbortSignal;
+  onProgress?: (progress: RendererExportProgress) => void;
+  timeSeconds?: number;
+}
+
+export interface RenderStillPngOptions extends RenderStillFrameOptions {}
 
 const INTERACTION_WINDOW_MS = 350;
 const STATUS_INTERVAL_MS = 500;
@@ -131,6 +176,10 @@ export class FragmentRenderer {
 
   private frameSeed = 1;
 
+  private cameraRayResolutionOverride: [number, number] | null = null;
+
+  private cameraRayPixelOffsetOverride: [number, number] = [0, 0];
+
   constructor(canvas: HTMLCanvasElement, options: RendererOptions) {
     this.canvas = canvas;
     this.gl = assertWebGl2(canvas);
@@ -150,19 +199,28 @@ export class FragmentRenderer {
 
     const sources = buildSceneShaderSources({
       geometrySource: next.geometrySource,
+      geometryLineMap: next.geometryLineMap,
       integrator: next.integrator
     });
 
     const focusProbeSources = buildFocusProbeShaderSources({
-      geometrySource: next.geometrySource
+      geometrySource: next.geometrySource,
+      geometryLineMap: next.geometryLineMap
     });
 
-    const program = createProgram(this.gl, sources.vertexSource, sources.fragmentSource);
-    const focusProgram = createProgram(
-      this.gl,
-      focusProbeSources.vertexSource,
-      focusProbeSources.fragmentSource
-    );
+    let program: WebGLProgram;
+    try {
+      program = createProgram(this.gl, sources.vertexSource, sources.fragmentSource);
+    } catch (error) {
+      throw this.wrapShaderBuildError(error, "scene", sources.fragmentLineMap);
+    }
+    let focusProgram: WebGLProgram;
+    try {
+      focusProgram = createProgram(this.gl, focusProbeSources.vertexSource, focusProbeSources.fragmentSource);
+    } catch (error) {
+      this.gl.deleteProgram(program);
+      throw this.wrapShaderBuildError(error, "focus", focusProbeSources.fragmentLineMap);
+    }
     if (this.sceneProgram !== null) {
       this.gl.deleteProgram(this.sceneProgram);
     }
@@ -174,6 +232,7 @@ export class FragmentRenderer {
 
     this.sceneState = {
       geometrySource: next.geometrySource,
+      geometryLineMap: next.geometryLineMap,
       uniformDefinitions: next.uniformDefinitions,
       uniformValues: { ...next.uniformValues },
       integrator: next.integrator,
@@ -181,6 +240,31 @@ export class FragmentRenderer {
     };
 
     this.markDirty();
+  }
+
+  private wrapShaderBuildError(
+    error: unknown,
+    stage: "scene" | "focus",
+    fragmentLineMap: Array<SourceLineRef | null> | undefined
+  ): Error {
+    if (!(error instanceof WebGlShaderCompileError)) {
+      return error instanceof Error ? error : new Error(String(error));
+    }
+    const diagnostics = mapShaderCompilerDiagnostics(
+      parseShaderCompilerLog(error.log),
+      error.shaderKind === "fragment" ? fragmentLineMap : undefined
+    );
+    const mappedSummary = formatMappedShaderDiagnostics(diagnostics);
+    const message = `Shader error (${stage} ${error.shaderKind}): ${error.log}${
+      mappedSummary.length > 0 ? `\nMapped diagnostics:\n${mappedSummary}` : ""
+    }`;
+    return new RendererShaderProgramError({
+      stage,
+      shaderKind: error.shaderKind,
+      rawLog: error.log,
+      diagnostics,
+      message
+    });
   }
 
   setRenderSettings(next: Partial<RenderSettings>): void {
@@ -385,6 +469,73 @@ export class FragmentRenderer {
     return value;
   }
 
+  async renderStill(options: RenderStillFrameOptions): Promise<void> {
+    if (this.running) {
+      throw new Error("Offline export requires a renderer instance that is not running.");
+    }
+    if (this.sceneProgram === null || this.sceneState === null) {
+      throw new Error("Renderer scene is not initialized.");
+    }
+
+    const width = Math.max(1, Math.round(options.width));
+    const height = Math.max(1, Math.round(options.height));
+    const targetSubframes = Math.max(1, Math.round(options.subframes));
+    const timeMs = (options.timeSeconds ?? 0) * 1000;
+
+    this.setRenderSettings({
+      interactionResolutionScale: 1,
+      maxSubframes: targetSubframes
+    });
+    this.setDisplaySize(width, height, 1);
+    this.lastInteractionMs = Number.NEGATIVE_INFINITY;
+    this.wasInteracting = false;
+    this.markDirty();
+
+    let iterations = 0;
+    while (true) {
+      if (options.signal?.aborted === true) {
+        throw createExportAbortError();
+      }
+
+      this.render(timeMs);
+      options.onProgress?.(this.getExportProgress(targetSubframes));
+
+      if (this.subframe >= targetSubframes) {
+        break;
+      }
+
+      iterations += 1;
+      if ((iterations & 1) === 0) {
+        await waitForNextAnimationFrame();
+      }
+    }
+
+    options.onProgress?.({
+      progress: 1,
+      subframe: targetSubframes,
+      tileCursor: 0,
+      totalSubframes: targetSubframes,
+      tileCount: this.renderSettings.tileCount
+    });
+  }
+
+  async renderStillToPngBlob(options: RenderStillPngOptions): Promise<Blob> {
+    await this.renderStill(options);
+    return await this.captureDisplayPngBlob();
+  }
+
+  setCameraRayViewportOverride(fullResolution: [number, number] | null, pixelOffset: [number, number] = [0, 0]): void {
+    this.cameraRayResolutionOverride = fullResolution === null ? null : [fullResolution[0], fullResolution[1]];
+    this.cameraRayPixelOffsetOverride = [pixelOffset[0], pixelOffset[1]];
+    this.markDirty();
+  }
+
+  clearCameraRayViewportOverride(): void {
+    this.cameraRayResolutionOverride = null;
+    this.cameraRayPixelOffsetOverride = [0, 0];
+    this.markDirty();
+  }
+
   private readonly tick = (now: number): void => {
     if (!this.running) {
       return;
@@ -495,6 +646,20 @@ export class FragmentRenderer {
     this.updateStatus(now, pixelWidth, pixelHeight);
   }
 
+  private getExportProgress(totalSubframes: number): RendererExportProgress {
+    const tileCount = Math.max(1, Math.round(this.renderSettings.tileCount));
+    const totalTiles = tileCount * tileCount;
+    const frameProgress = tileCount > 1 ? this.subframe + this.tileCursor / totalTiles : this.subframe;
+    const progress = totalSubframes <= 0 ? 1 : clamp(frameProgress / totalSubframes, 0, 1);
+    return {
+      progress,
+      subframe: this.subframe,
+      tileCursor: this.tileCursor,
+      totalSubframes,
+      tileCount
+    };
+  }
+
   private ensureTargets(width: number, height: number): void {
     if (
       this.readTarget !== null &&
@@ -553,7 +718,12 @@ export class FragmentRenderer {
     }
     gl.useProgram(this.sceneProgram);
 
-    this.setVec2Uniform(this.sceneProgram, "uResolution", [this.writeTarget.width, this.writeTarget.height]);
+    this.setVec2Uniform(
+      this.sceneProgram,
+      "uResolution",
+      this.cameraRayResolutionOverride ?? [this.writeTarget.width, this.writeTarget.height]
+    );
+    this.setVec2Uniform(this.sceneProgram, "uPixelOffset", this.cameraRayPixelOffsetOverride);
     this.setFloatUniform(this.sceneProgram, "uTime", now * 0.001);
     this.setIntUniform(this.sceneProgram, "uSubframe", this.subframe);
     this.setIntUniform(this.sceneProgram, "uFrameIndex", this.nextFrameSeed());
@@ -595,7 +765,12 @@ export class FragmentRenderer {
     gl.scissor(tileRect.x, tileRect.y, tileRect.width, tileRect.height);
     gl.useProgram(this.sceneProgram);
 
-    this.setVec2Uniform(this.sceneProgram, "uResolution", [this.readTarget.width, this.readTarget.height]);
+    this.setVec2Uniform(
+      this.sceneProgram,
+      "uResolution",
+      this.cameraRayResolutionOverride ?? [this.readTarget.width, this.readTarget.height]
+    );
+    this.setVec2Uniform(this.sceneProgram, "uPixelOffset", this.cameraRayPixelOffsetOverride);
     this.setFloatUniform(this.sceneProgram, "uTime", now * 0.001);
     this.setIntUniform(this.sceneProgram, "uSubframe", 0);
     this.setIntUniform(this.sceneProgram, "uFrameIndex", this.nextFrameSeed());
@@ -881,8 +1056,67 @@ export class FragmentRenderer {
     }
     this.gl.uniform4f(location, value[0], value[1], value[2], value[3]);
   }
+
+  async captureDisplayPngBlob(): Promise<Blob> {
+    const image = this.captureDisplayImageData();
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = image.width;
+    exportCanvas.height = image.height;
+    const ctx = exportCanvas.getContext("2d");
+    if (ctx === null) {
+      throw new Error("2D canvas context is unavailable for PNG export.");
+    }
+    ctx.putImageData(image, 0, 0);
+    return await canvasToPngBlob(exportCanvas);
+  }
+
+  captureDisplayImageData(): ImageData {
+    const width = Math.max(1, Math.floor(this.canvas.width));
+    const height = Math.max(1, Math.floor(this.canvas.height));
+    const gl = this.gl;
+
+    // Read back the post-processed display buffer synchronously. This avoids black PNG exports
+    // caused by async canvas.toBlob() snapshots on WebGL canvases with preserveDrawingBuffer=false.
+    const raw = new Uint8Array(width * height * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+
+    const flipped = new Uint8ClampedArray(raw.length);
+    const rowBytes = width * 4;
+    for (let y = 0; y < height; y += 1) {
+      const srcOffset = (height - 1 - y) * rowBytes;
+      const dstOffset = y * rowBytes;
+      flipped.set(raw.subarray(srcOffset, srcOffset + rowBytes), dstOffset);
+    }
+
+    return new ImageData(flipped, width, height);
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function waitForNextAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob === null) {
+        reject(new Error("Canvas PNG export failed."));
+        return;
+      }
+      resolve(blob);
+    }, "image/png");
+  });
+}
+
+function createExportAbortError(): Error {
+  const error = new Error("Export cancelled.");
+  error.name = "AbortError";
+  return error;
 }

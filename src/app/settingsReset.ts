@@ -1,4 +1,4 @@
-import { applyPresetValues, getDefaultUniformValues } from "../core/parser/uniformState";
+import { resolvePresetUniformValues } from "../core/parser/uniformState";
 import type { ParsedPreset, UniformDefinition, UniformValue } from "../core/parser/types";
 import { DEFAULT_RENDER_SETTINGS, type RenderSettings } from "../core/render/renderer";
 import { normalizeUniformGroupName } from "./uniformGroups";
@@ -48,10 +48,6 @@ function applyRenderDefaults(
   return next;
 }
 
-function findPresetByName(presets: ParsedPreset[], name: string): ParsedPreset | null {
-  return presets.find((preset) => preset.name === name) ?? null;
-}
-
 export function resetRenderSettingsGroup(current: RenderSettings): RenderSettings {
   return applyRenderDefaults(current, RENDER_GROUP_KEYS);
 }
@@ -63,13 +59,7 @@ export function resetPostSettingsGroup(current: RenderSettings): RenderSettings 
 export function buildDefaultUniformValuesForPreset(
   args: BuildDefaultUniformValuesArgs
 ): Record<string, UniformValue> {
-  let nextValues = getDefaultUniformValues(args.uniforms);
-  if (args.selectedPresetName !== null) {
-    const preset = findPresetByName(args.presets, args.selectedPresetName);
-    if (preset !== null) {
-      nextValues = applyPresetValues(args.uniforms, nextValues, preset);
-    }
-  }
+  const nextValues = resolvePresetUniformValues(args.uniforms, args.presets, args.selectedPresetName);
 
   return Object.fromEntries(
     Object.entries(nextValues).map(([name, value]) => [name, cloneUniformValue(value)])

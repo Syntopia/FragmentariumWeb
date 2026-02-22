@@ -76,7 +76,7 @@ describe("UniformPanel", () => {
     expect(lastValue).toBe(true);
   });
 
-  test("uses r/g/b labels for color controls and applies color-picker updates", () => {
+  test("renders a single color picker for color controls and applies updates", () => {
     const uniforms: UniformDefinition[] = [
       {
         name: "Tint",
@@ -104,10 +104,8 @@ describe("UniformPanel", () => {
       />
     );
 
-    const axisLabels = [...container.querySelectorAll(".uniform-axis")].map((entry) =>
-      entry.textContent?.trim().toLowerCase()
-    );
-    expect(axisLabels).toEqual(["r", "g", "b"]);
+    const axisLabels = [...container.querySelectorAll(".uniform-axis")].map((entry) => entry.textContent?.trim().toLowerCase());
+    expect(axisLabels).toEqual([]);
 
     const colorPicker = screen.getByLabelText("Tint color") as HTMLInputElement;
     fireEvent.change(colorPicker, { target: { value: "#336699" } });

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { AppButton } from "./AppButton";
 
 interface SaveLocalSystemDialogProps {
   open: boolean;
@@ -40,8 +41,8 @@ export function SaveLocalSystemDialog(props: SaveLocalSystemDialogProps): JSX.El
         aria-modal="true"
         aria-labelledby="save-local-dialog-title"
       >
-        <h3 id="save-local-dialog-title">Save to Local Storage</h3>
-        <p className="muted">Path supports subfolders, for example `mandelbulb/mikaels`.</p>
+        <h3 id="save-local-dialog-title">Save Session</h3>
+        <p className="muted">Session path supports subfolders, for example `mandelbulb/mikaels`.</p>
         <label className="modal-field">
           <span className="uniform-label">Path</span>
           <input
@@ -63,14 +64,14 @@ export function SaveLocalSystemDialog(props: SaveLocalSystemDialogProps): JSX.El
           />
         </label>
         {props.errorMessage !== null ? <p className="dialog-error">{props.errorMessage}</p> : null}
-        {props.isOverwrite ? <p className="dialog-warning">Existing local system will be overwritten.</p> : null}
+        {props.isOverwrite ? <p className="dialog-warning">Existing session will be overwritten.</p> : null}
         <div className="modal-actions">
-          <button type="button" onClick={props.onCancel}>
+          <AppButton onClick={props.onCancel}>
             Cancel
-          </button>
-          <button type="button" onClick={props.onSave}>
+          </AppButton>
+          <AppButton variant={props.isOverwrite ? "danger" : "primary"} onClick={props.onSave}>
             {props.isOverwrite ? "Overwrite" : "Save"}
-          </button>
+          </AppButton>
         </div>
       </div>
     </div>

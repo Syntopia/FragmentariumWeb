@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { INTEGRATORS, getDefaultIntegratorOptions, getIntegratorById } from "../src/core/integrators/definitions";
+import {
+  INTEGRATORS,
+  getDefaultIntegratorOptions,
+  getIntegratorById,
+  transferSharedIntegratorOptions
+} from "../src/core/integrators/definitions";
 
 describe("integrators", () => {
   test("keeps fast and quality raster integrators distinct", () => {
@@ -27,7 +32,7 @@ describe("integrators", () => {
     expect(qualityDefaults.orbitTrapHueOffset).toBe(0);
     expect(qualityDefaults.orbitTrapHueScale).toBe(1);
     expect(qualityDefaults.orbitTrapSaturation).toBe(1);
-    expect(qualityDefaults.orbitTrapValue).toBe(1);
+    expect(qualityDefaults.orbitTrapValue).toBe(0);
     expect(qualityDefaults.orbitTrapMix).toBe(1);
     expect(qualityDefaults.aperture).toBe(0);
     expect(qualityDefaults.focalDistance).toBe(6);
@@ -44,6 +49,7 @@ describe("integrators", () => {
     expect(INTEGRATORS.some((entry) => entry.id === "de-pathtracer-physical")).toBe(true);
     expect(integrator.options.some((option) => option.key === "roughness")).toBe(true);
     expect(integrator.options.some((option) => option.key === "metallic")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "diffuseColorR")).toBe(true);
     expect(integrator.options.some((option) => option.key === "useOrbitTrap")).toBe(true);
     expect(integrator.options.some((option) => option.key === "orbitTrapFalloff")).toBe(true);
     expect(integrator.options.some((option) => option.key === "orbitTrapHueOffset")).toBe(true);
@@ -52,6 +58,9 @@ describe("integrators", () => {
     expect(integrator.options.some((option) => option.key === "orbitTrapValue")).toBe(true);
     expect(integrator.options.some((option) => option.key === "orbitTrapMix")).toBe(true);
     expect(integrator.options.some((option) => option.key === "sunAngularDiameterDeg")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "iblEnabled")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "iblStrength")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "iblRotationDeg")).toBe(true);
     expect(integrator.options.some((option) => option.key === "areaLightEnabled")).toBe(true);
     expect(integrator.options.some((option) => option.key === "areaLightIntensity")).toBe(true);
     expect(integrator.options.some((option) => option.key === "areaLightSize")).toBe(true);
@@ -74,9 +83,16 @@ describe("integrators", () => {
     expect(defaults.orbitTrapHueOffset).toBe(0);
     expect(defaults.orbitTrapHueScale).toBe(1);
     expect(defaults.orbitTrapSaturation).toBe(1);
-    expect(defaults.orbitTrapValue).toBe(1);
+    expect(defaults.orbitTrapValue).toBe(0);
     expect(defaults.orbitTrapMix).toBe(1);
+    expect(defaults.diffuseColorR).toBe(0.9);
+    expect(defaults.diffuseColorG).toBe(0.82);
+    expect(defaults.diffuseColorB).toBe(0.72);
     expect(defaults.directLight).toBe(1);
+    expect(defaults.iblEnabled).toBe(1);
+    expect(defaults.iblStrength).toBe(1);
+    expect(defaults.iblExposure).toBe(0);
+    expect(defaults.iblRotationDeg).toBe(0);
     expect(defaults.detailExp).toBe(-2.7);
     expect(defaults.maxRaySteps).toBe(200);
     expect(defaults.areaLightEnabled).toBe(1);
@@ -95,5 +111,38 @@ describe("integrators", () => {
 
   test("throws for unknown integrator id", () => {
     expect(() => getIntegratorById("missing-integrator")).toThrow(/Unknown integrator/);
+  });
+
+  test("transfers shared material and orbit-trap settings across integrators", () => {
+    const qualityDefaults = getDefaultIntegratorOptions("de-raytracer");
+    const pathDefaults = getDefaultIntegratorOptions("de-pathtracer-physical");
+
+    const transferred = transferSharedIntegratorOptions(
+      "de-raytracer",
+      {
+        ...qualityDefaults,
+        roughness: 0.62,
+        metalness: 0.35,
+        diffuseColorR: 0.1,
+        diffuseColorG: 0.2,
+        diffuseColorB: 0.3,
+        orbitTrapFalloff: 9.5,
+        orbitTrapHueScale: 2.75,
+        useOrbitTrap: 0,
+        focalDistance: 12
+      },
+      "de-pathtracer-physical",
+      pathDefaults
+    );
+
+    expect(transferred.roughness).toBe(0.62);
+    expect(transferred.metallic).toBe(0.35);
+    expect(transferred.diffuseColorR).toBe(0.1);
+    expect(transferred.diffuseColorG).toBe(0.2);
+    expect(transferred.diffuseColorB).toBe(0.3);
+    expect(transferred.orbitTrapFalloff).toBe(9.5);
+    expect(transferred.orbitTrapHueScale).toBe(2.75);
+    expect(transferred.useOrbitTrap).toBe(0);
+    expect(transferred.focalDistance).toBe(12);
   });
 });

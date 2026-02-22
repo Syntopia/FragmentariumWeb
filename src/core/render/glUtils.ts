@@ -1,3 +1,19 @@
+export class WebGlShaderCompileError extends Error {
+  readonly shaderKind: "vertex" | "fragment";
+
+  readonly log: string;
+
+  readonly source: string;
+
+  constructor(shaderKind: "vertex" | "fragment", log: string, source: string) {
+    super(log);
+    this.name = "WebGlShaderCompileError";
+    this.shaderKind = shaderKind;
+    this.log = log;
+    this.source = source;
+  }
+}
+
 export function assertWebGl2(canvas: HTMLCanvasElement): WebGL2RenderingContext {
   const gl = canvas.getContext("webgl2", {
     antialias: false,
@@ -36,7 +52,7 @@ export function createShader(
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
     const log = gl.getShaderInfoLog(shader) ?? "Unknown GLSL compile error.";
     gl.deleteShader(shader);
-    throw new Error(log);
+    throw new WebGlShaderCompileError(shaderType === gl.VERTEX_SHADER ? "vertex" : "fragment", log, source);
   }
   return shader;
 }

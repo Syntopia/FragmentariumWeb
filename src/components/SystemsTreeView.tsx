@@ -111,7 +111,7 @@ export function SystemsTreeView(props: SystemsTreeViewProps): JSX.Element {
                 props.onDeleteLocal(node.localPath as string);
               }}
               aria-label={`Delete ${node.name}`}
-              title="Delete local system"
+              title="Delete session"
             >
               Delete
             </button>

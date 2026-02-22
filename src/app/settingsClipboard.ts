@@ -6,6 +6,13 @@ import type { CameraState } from "../core/geometry/camera";
 
 export const SETTINGS_CLIPBOARD_FORMAT = "fragmentarium-web-settings-v1";
 
+export interface SettingsClipboardSystemDefinition {
+  source: string;
+  treePath: string | null;
+  sourcePath: string | null;
+  selectedSystemKey: string | null;
+}
+
 export interface SettingsClipboardPayload {
   format: typeof SETTINGS_CLIPBOARD_FORMAT;
   selectedPresetName: string | null;
@@ -14,6 +21,7 @@ export interface SettingsClipboardPayload {
   renderSettings: RenderSettings;
   uniformValues: Record<string, UniformValue>;
   camera: CameraState;
+  systemDefinition?: SettingsClipboardSystemDefinition;
 }
 
 interface BuildSettingsClipboardPayloadArgs {
@@ -23,6 +31,7 @@ interface BuildSettingsClipboardPayloadArgs {
   renderSettings: RenderSettings;
   uniformValues: Record<string, UniformValue>;
   camera: CameraState;
+  systemDefinition?: SettingsClipboardSystemDefinition;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -38,6 +47,16 @@ function asFiniteNumber(value: unknown, fieldName: string): number {
 
 function asStringOrNull(value: unknown, fieldName: string): string | null {
   if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Invalid '${fieldName}' value in clipboard payload.`);
+  }
+  return value;
+}
+
+function asOptionalStringOrNull(value: unknown, fieldName: string): string | null {
+  if (value === undefined || value === null) {
     return null;
   }
   if (typeof value !== "string") {
@@ -137,6 +156,25 @@ function asRenderSettings(value: unknown): RenderSettings {
   };
 }
 
+function asSystemDefinition(value: unknown): SettingsClipboardSystemDefinition | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error("Invalid 'systemDefinition' value in clipboard payload.");
+  }
+  if (typeof value.source !== "string" || value.source.length === 0) {
+    throw new Error("Invalid 'systemDefinition.source' value in clipboard payload.");
+  }
+
+  return {
+    source: value.source,
+    treePath: asOptionalStringOrNull(value.treePath, "systemDefinition.treePath"),
+    sourcePath: asOptionalStringOrNull(value.sourcePath, "systemDefinition.sourcePath"),
+    selectedSystemKey: asOptionalStringOrNull(value.selectedSystemKey, "systemDefinition.selectedSystemKey")
+  };
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -162,7 +200,7 @@ export function coerceIntegratorOptionsForId(
 export function buildSettingsClipboardPayload(
   args: BuildSettingsClipboardPayloadArgs
 ): SettingsClipboardPayload {
-  return {
+  const payload: SettingsClipboardPayload = {
     format: SETTINGS_CLIPBOARD_FORMAT,
     selectedPresetName: args.selectedPresetName,
     integratorId: args.integratorId,
@@ -178,10 +216,45 @@ export function buildSettingsClipboardPayload(
       fov: args.camera.fov
     }
   };
+
+  if (args.systemDefinition !== undefined) {
+    payload.systemDefinition = {
+      source: args.systemDefinition.source,
+      treePath: args.systemDefinition.treePath,
+      sourcePath: args.systemDefinition.sourcePath,
+      selectedSystemKey: args.systemDefinition.selectedSystemKey
+    };
+  }
+
+  return payload;
 }
 
 export function serializeSettingsClipboardPayload(payload: SettingsClipboardPayload): string {
   return JSON.stringify(payload, null, 2);
+}
+
+function buildSessionComparisonShape(payload: SettingsClipboardPayload): unknown {
+  return {
+    format: payload.format,
+    selectedPresetName: payload.selectedPresetName,
+    integratorId: payload.integratorId,
+    integratorOptions: payload.integratorOptions,
+    renderSettings: payload.renderSettings,
+    uniformValues: payload.uniformValues,
+    camera: payload.camera,
+    systemDefinition:
+      payload.systemDefinition === undefined
+        ? undefined
+        : {
+            source: payload.systemDefinition.source
+          }
+  };
+}
+
+export function serializeSettingsClipboardPayloadForSessionComparison(
+  payload: SettingsClipboardPayload
+): string {
+  return JSON.stringify(buildSessionComparisonShape(payload));
 }
 
 export function parseSettingsClipboardPayload(raw: string): SettingsClipboardPayload {
@@ -211,6 +284,7 @@ export function parseSettingsClipboardPayload(raw: string): SettingsClipboardPay
     integratorOptions: asIntegratorOptions(parsed.integratorOptions),
     renderSettings: asRenderSettings(parsed.renderSettings),
     uniformValues: asUniformValueMap(parsed.uniformValues),
-    camera: asCameraState(parsed.camera)
+    camera: asCameraState(parsed.camera),
+    systemDefinition: asSystemDefinition(parsed.systemDefinition)
   };
 }

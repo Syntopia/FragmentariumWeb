@@ -4,7 +4,9 @@ import type { ParseResult } from "../src/core/parser/types";
 
 function makeParseResult(presetNames: string[]): ParseResult {
   return {
+    sourceName: "test.frag",
     shaderSource: "float DE(vec3 p){return length(p)-1.0;}",
+    shaderLineMap: [{ path: "test.frag", line: 1 }],
     uniforms: [],
     presets: presetNames.map((name) => ({ name, values: {}, raw: name })),
     cameraMode: "3D",

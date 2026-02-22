@@ -1,13 +1,14 @@
 import type { UniformDefinition, UniformValue } from "../core/parser/types";
+import { clamp, computeRgbIntensity, normalizeRgbByIntensity, parseHexColorToRgb, rgbToHexColor, scaleRgb, type Rgb } from "../utils/colorUi";
 
 interface UniformPanelProps {
   uniforms: UniformDefinition[];
   values: Record<string, UniformValue>;
+  baselineValues?: Record<string, UniformValue>;
   onChange: (name: string, value: UniformValue) => void;
 }
 
 const vectorLabels = ["x", "y", "z", "w"];
-const colorVectorLabels = ["r", "g", "b", "a"];
 
 export function UniformPanel(props: UniformPanelProps): JSX.Element {
   return (
@@ -17,6 +18,7 @@ export function UniformPanel(props: UniformPanelProps): JSX.Element {
           key={uniform.name}
           definition={uniform}
           value={props.values[uniform.name]}
+          baselineValue={props.baselineValues?.[uniform.name]}
           onChange={(value) => props.onChange(uniform.name, value)}
         />
       ))}
@@ -27,6 +29,7 @@ export function UniformPanel(props: UniformPanelProps): JSX.Element {
 interface UniformControlProps {
   definition: UniformDefinition;
   value: UniformValue;
+  baselineValue?: UniformValue;
   onChange: (value: UniformValue) => void;
 }
 
@@ -50,11 +53,15 @@ function UniformControl(props: UniformControlProps): JSX.Element {
   if (definition.type === "float" || definition.type === "int") {
     const numeric = Number(value);
     const step = definition.type === "int" ? 1 : inferStep(definition.min[0], definition.max[0]);
+    const baselineNumeric =
+      typeof props.baselineValue === "number" ? props.baselineValue : Number(definition.defaultValue);
+    const sliderStateClass = isSliderAtDefault(numeric, baselineNumeric, step) ? "slider-default" : "slider-changed";
     return (
       <div className="uniform-row">
         <span className="uniform-label">{definition.name}</span>
         <div className="uniform-inputs">
           <input
+            className={sliderStateClass}
             type="range"
             min={definition.min[0]}
             max={definition.max[0]}
@@ -87,30 +94,44 @@ function UniformControl(props: UniformControlProps): JSX.Element {
   }
 
   const vector = [...value];
-  const axisLabels = definition.control === "color" ? colorVectorLabels : vectorLabels;
-  const colorPreview = definition.control === "color" ? vectorToHexColor(vector) : null;
+  const baselineVector =
+    Array.isArray(props.baselineValue) && props.baselineValue.length >= vector.length
+      ? props.baselineValue
+      : Array.isArray(definition.defaultValue)
+        ? definition.defaultValue
+        : vector;
+  if (definition.control === "color" && vector.length >= 3) {
+    return (
+      <ColorUniformControl
+        definition={definition}
+        vector={vector}
+        baselineVector={baselineVector}
+        onChange={(next) => props.onChange(next)}
+      />
+    );
+  }
+
+  const axisLabels = vectorLabels;
 
   return (
     <div className="uniform-vector">
-      <div className="uniform-vector-header">
+      <div className="uniform-vector-header uniform-vector-header-centered">
         <span className="uniform-label">{definition.name}</span>
-        {colorPreview !== null ? (
-          <input
-            className="uniform-color-preview uniform-color-picker"
-            type="color"
-            aria-label={`${definition.name} color`}
-            value={colorPreview}
-            onChange={(event) => {
-              props.onChange(applyHexColorToVector(vector, event.target.value));
-            }}
-          />
-        ) : null}
       </div>
       {vector.map((entry, index) => (
         <div className="uniform-row compact" key={`${definition.name}-${axisLabels[index]}-${index}`}>
           <span className="uniform-axis">{axisLabels[index]}</span>
           <div className="uniform-inputs">
             <input
+              className={
+                isSliderAtDefault(
+                  entry,
+                  Number(baselineVector[index] ?? entry),
+                  inferStep(definition.min[index], definition.max[index])
+                )
+                  ? "slider-default"
+                  : "slider-changed"
+              }
               type="range"
               min={definition.min[index]}
               max={definition.max[index]}
@@ -144,6 +165,145 @@ function UniformControl(props: UniformControlProps): JSX.Element {
   );
 }
 
+interface ColorUniformControlProps {
+  definition: UniformDefinition;
+  vector: number[];
+  baselineVector: number[];
+  onChange: (value: number[]) => void;
+}
+
+function ColorUniformControl(props: ColorUniformControlProps): JSX.Element {
+  const { definition, vector, baselineVector } = props;
+  const rgb: Rgb = [Number(vector[0] ?? 0), Number(vector[1] ?? 0), Number(vector[2] ?? 0)];
+  const baselineRgb: Rgb = [
+    Number(baselineVector[0] ?? rgb[0]),
+    Number(baselineVector[1] ?? rgb[1]),
+    Number(baselineVector[2] ?? rgb[2])
+  ];
+  const maxChannel = Math.max(definition.max[0] ?? 1, definition.max[1] ?? 1, definition.max[2] ?? 1, 1);
+  const minChannel = Math.min(definition.min[0] ?? 0, definition.min[1] ?? 0, definition.min[2] ?? 0, 0);
+  const showIntensity = maxChannel > 1.000001 || computeRgbIntensity(baselineRgb) > 1.000001;
+  const intensity = computeRgbIntensity(rgb);
+  const baselineIntensity = computeRgbIntensity(baselineRgb);
+  const normalizedColor = normalizeRgbByIntensity(rgb, intensity);
+  const colorHex = rgbToHexColor(normalizedColor);
+  const intensityStep = inferStep(0, maxChannel);
+
+  const alphaIndex = vector.length === 4 ? 3 : -1;
+  const alphaValue = alphaIndex >= 0 ? Number(vector[alphaIndex]) : null;
+  const alphaBaseline = alphaIndex >= 0 ? Number(baselineVector[alphaIndex] ?? alphaValue ?? 1) : null;
+  const alphaMin = alphaIndex >= 0 ? definition.min[alphaIndex] : 0;
+  const alphaMax = alphaIndex >= 0 ? definition.max[alphaIndex] : 1;
+
+  return (
+    <div className="uniform-vector">
+      <div className="uniform-vector-header">
+        <span className="uniform-label">{definition.name}</span>
+        <input
+          className="uniform-color-preview uniform-color-picker"
+          type="color"
+          aria-label={`${definition.name} color`}
+          value={colorHex}
+          onChange={(event) => {
+            const parsed = parseHexColorToRgb(event.target.value);
+            if (parsed === null) {
+              return;
+            }
+            const scaled = showIntensity ? scaleRgb(parsed, intensity > 1e-9 ? intensity : 1) : parsed;
+            const next = [...vector];
+            next[0] = clamp(scaled[0], definition.min[0], definition.max[0]);
+            next[1] = clamp(scaled[1], definition.min[1], definition.max[1]);
+            next[2] = clamp(scaled[2], definition.min[2], definition.max[2]);
+            props.onChange(next);
+          }}
+        />
+      </div>
+
+      {showIntensity ? (
+        <div className="uniform-row compact" key={`${definition.name}-intensity`}>
+          <span className="uniform-axis">i</span>
+          <div className="uniform-inputs">
+            <input
+              className={isSliderAtDefault(intensity, baselineIntensity, intensityStep) ? "slider-default" : "slider-changed"}
+              type="range"
+              min={Math.max(0, minChannel)}
+              max={maxChannel}
+              step={intensityStep}
+              value={intensity}
+              onChange={(event) => {
+                const nextIntensity = clamp(Number(event.target.value), Math.max(0, minChannel), maxChannel);
+                const hue: Rgb = intensity > 1e-9 ? normalizeRgbByIntensity(rgb, intensity) : [1, 1, 1];
+                const scaled = scaleRgb(hue, nextIntensity);
+                const next = [...vector];
+                next[0] = clamp(scaled[0], definition.min[0], definition.max[0]);
+                next[1] = clamp(scaled[1], definition.min[1], definition.max[1]);
+                next[2] = clamp(scaled[2], definition.min[2], definition.max[2]);
+                props.onChange(next);
+              }}
+            />
+            <input
+              className="uniform-number"
+              type="number"
+              min={Math.max(0, minChannel)}
+              max={maxChannel}
+              step={intensityStep}
+              value={intensity}
+              onChange={(event) => {
+                const nextIntensity = clamp(Number(event.target.value), Math.max(0, minChannel), maxChannel);
+                const hue: Rgb = intensity > 1e-9 ? normalizeRgbByIntensity(rgb, intensity) : [1, 1, 1];
+                const scaled = scaleRgb(hue, nextIntensity);
+                const next = [...vector];
+                next[0] = clamp(scaled[0], definition.min[0], definition.max[0]);
+                next[1] = clamp(scaled[1], definition.min[1], definition.max[1]);
+                next[2] = clamp(scaled[2], definition.min[2], definition.max[2]);
+                props.onChange(next);
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {alphaIndex >= 0 && alphaValue !== null && alphaBaseline !== null ? (
+        <div className="uniform-row compact" key={`${definition.name}-alpha`}>
+          <span className="uniform-axis">a</span>
+          <div className="uniform-inputs">
+            <input
+              className={
+                isSliderAtDefault(alphaValue, alphaBaseline, inferStep(alphaMin, alphaMax))
+                  ? "slider-default"
+                  : "slider-changed"
+              }
+              type="range"
+              min={alphaMin}
+              max={alphaMax}
+              step={inferStep(alphaMin, alphaMax)}
+              value={alphaValue}
+              onChange={(event) => {
+                const next = [...vector];
+                next[alphaIndex] = Number(event.target.value);
+                props.onChange(next);
+              }}
+            />
+            <input
+              className="uniform-number"
+              type="number"
+              min={alphaMin}
+              max={alphaMax}
+              step={inferStep(alphaMin, alphaMax)}
+              value={alphaValue}
+              onChange={(event) => {
+                const next = [...vector];
+                next[alphaIndex] = Number(event.target.value);
+                props.onChange(next);
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function inferStep(min: number, max: number): number {
   const span = Math.abs(max - min);
   if (span > 100) {
@@ -155,38 +315,7 @@ function inferStep(min: number, max: number): number {
   return 0.001;
 }
 
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
-
-function vectorToHexColor(vector: number[]): string {
-  const toHex = (value: number): string => Math.round(clamp01(value) * 255).toString(16).padStart(2, "0");
-  const r = toHex(vector[0] ?? 0);
-  const g = toHex(vector[1] ?? 0);
-  const b = toHex(vector[2] ?? 0);
-  return `#${r}${g}${b}`;
-}
-
-function applyHexColorToVector(vector: number[], colorHex: string): number[] {
-  const match = /^#?([0-9a-fA-F]{6})$/.exec(colorHex);
-  if (match === null) {
-    return vector;
-  }
-
-  const rgb = match[1];
-  const r = parseInt(rgb.slice(0, 2), 16) / 255;
-  const g = parseInt(rgb.slice(2, 4), 16) / 255;
-  const b = parseInt(rgb.slice(4, 6), 16) / 255;
-
-  const next = [...vector];
-  if (next.length > 0) {
-    next[0] = r;
-  }
-  if (next.length > 1) {
-    next[1] = g;
-  }
-  if (next.length > 2) {
-    next[2] = b;
-  }
-  return next;
+function isSliderAtDefault(value: number, baseline: number, step: number): boolean {
+  const tolerance = Math.max(Math.abs(step) * 0.5, 1.0e-9);
+  return Math.abs(value - baseline) <= tolerance;
 }

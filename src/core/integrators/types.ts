@@ -5,6 +5,8 @@ export interface IntegratorOptionDefinition {
   max: number;
   defaultValue: number;
   step?: number;
+  group?: string;
+  sharedSemantic?: string;
 }
 
 export interface IntegratorDefinition {

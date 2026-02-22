@@ -1,22 +1,52 @@
 import type { IntegratorDefinition } from "../integrators/types";
+import type { SourceLineRef } from "../parser/types";
 
 export interface SceneShaderBuildOptions {
   geometrySource: string;
+  geometryLineMap?: Array<SourceLineRef | null>;
   integrator: IntegratorDefinition;
 }
 
 export interface FocusProbeShaderBuildOptions {
   geometrySource: string;
+  geometryLineMap?: Array<SourceLineRef | null>;
 }
 
 export interface SceneShaderSources {
   vertexSource: string;
   fragmentSource: string;
+  fragmentLineMap?: Array<SourceLineRef | null>;
 }
 
 export interface DisplayShaderSources {
   vertexSource: string;
   fragmentSource: string;
+}
+
+function lineCount(source: string): number {
+  return source.length === 0 ? 1 : source.split(/\r\n|\r|\n/).length;
+}
+
+function buildFragmentLineMap(
+  fragmentSource: string,
+  geometrySource: string,
+  geometryLineMap: Array<SourceLineRef | null> | undefined
+): Array<SourceLineRef | null> | undefined {
+  if (geometryLineMap === undefined || geometryLineMap.length === 0) {
+    return undefined;
+  }
+  const geometryIndex = fragmentSource.indexOf(geometrySource);
+  if (geometryIndex < 0) {
+    return undefined;
+  }
+  const startLine = lineCount(fragmentSource.slice(0, geometryIndex));
+  const finalLineCount = lineCount(fragmentSource);
+  const mapped = Array.from({ length: finalLineCount }, () => null as SourceLineRef | null);
+  const maxLines = Math.min(geometryLineMap.length, finalLineCount - (startLine - 1));
+  for (let i = 0; i < maxLines; i += 1) {
+    mapped[startLine - 1 + i] = geometryLineMap[i] ?? null;
+  }
+  return mapped;
 }
 
 const sceneMathPrelude = `
@@ -268,6 +298,7 @@ in vec2 vUv;
 out vec4 fragColor;
 
 uniform vec2 uResolution;
+uniform vec2 uPixelOffset;
 uniform float uTime;
 uniform int uSubframe;
 uniform int uFrameIndex;
@@ -322,15 +353,16 @@ vec2 fragmentariumWebSampleDiskRng(inout uint rngState) {
 ${apertureResolver}
 ${focalDistanceResolver}
 void cameraRay(vec2 fragCoord, out vec3 rayOrigin, out vec3 rayDir) {
-  vec2 uv = fragCoord / uResolution;
+  vec2 pixelCoord = fragCoord + uPixelOffset;
+  vec2 uv = pixelCoord / uResolution;
   uv = uv * 2.0 - 1.0;
   uv.x *= uResolution.x / max(uResolution.y, 1.0);
 
   float frameSeed = float(uFrameIndex);
   vec2 jitter =
     (vec2(
-      hash12(fragCoord + vec2(3.0, 19.0) + vec2(frameSeed * 0.6180339, frameSeed * 0.4142135) + float(uSubframe)),
-      hash12(fragCoord + vec2(47.0, 7.0) + vec2(frameSeed * 0.1415927, frameSeed * 0.7320508) + float(uSubframe))
+      hash12(pixelCoord + vec2(3.0, 19.0) + vec2(frameSeed * 0.6180339, frameSeed * 0.4142135) + float(uSubframe)),
+      hash12(pixelCoord + vec2(47.0, 7.0) + vec2(frameSeed * 0.1415927, frameSeed * 0.7320508) + float(uSubframe))
     ) - 0.5) *
     clamp(uAAStrength, 0.0, 2.0);
   jitter /= max(uResolution, vec2(1.0));
@@ -347,11 +379,11 @@ void cameraRay(vec2 fragCoord, out vec3 rayOrigin, out vec3 rayDir) {
   float focalDistance = fragmentariumWebCameraFocalDistance();
   if (aperture > 1.0e-6) {
 #ifdef FRAGMENTARIUM_WEB_HAS_PCG_RNG
-    uint lensRng = fragmentariumWebRngInit(fragCoord, uSubframe, uFrameIndex + 7919);
+    uint lensRng = fragmentariumWebRngInit(pixelCoord, uSubframe, uFrameIndex + 7919);
     vec2 lens = fragmentariumWebSampleDiskRng(lensRng) * aperture;
 #else
     vec2 lens = fragmentariumWebSampleDisk(
-      fragCoord + vec2(71.13, 29.47) * (float(uSubframe + 1) + frameSeed * 0.5)
+      pixelCoord + vec2(71.13, 29.47) * (float(uSubframe + 1) + frameSeed * 0.5)
     ) * aperture;
 #endif
     vec3 lensOffset = right * lens.x + upOrtho * lens.y;
@@ -383,7 +415,8 @@ ${initInvocation}  vec3 rayOrigin;
 
   return {
     vertexSource: fullScreenTriangleVertexShader,
-    fragmentSource
+    fragmentSource,
+    fragmentLineMap: buildFragmentLineMap(fragmentSource, options.geometrySource, options.geometryLineMap)
   };
 }
 
@@ -485,7 +518,8 @@ ${initInvocation}  vec2 focusUv = clamp(uFocusUv, vec2(0.0), vec2(1.0));
 
   return {
     vertexSource: fullScreenTriangleVertexShader,
-    fragmentSource
+    fragmentSource,
+    fragmentLineMap: buildFragmentLineMap(fragmentSource, options.geometrySource, options.geometryLineMap)
   };
 }
 

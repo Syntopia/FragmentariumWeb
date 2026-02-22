@@ -63,10 +63,20 @@ export class CameraController {
   }
 
   getBasis(): CameraBasis {
-    const dir = normalize(sub(this.state.target, this.state.eye));
-    const right = normalize(cross(dir, this.state.up));
-    const upOrtho = normalize(sub(this.state.up, scale(dir, dot3(this.state.up, dir))));
-    return { dir, right, upOrtho };
+    const dir = this.ensureValidDirection();
+    let right = cross(dir, this.state.up);
+    const rightLen = vecLen(right);
+    if (!Number.isFinite(rightLen) || rightLen <= 1e-8) {
+      this.orthogonalizeUp();
+      right = cross(dir, this.state.up);
+    }
+    const rightSafe = normalizeVecWithFallback(
+      right,
+      Math.abs(dir[1]) < 0.9 ? cross(dir, [0, 1, 0]) : cross(dir, [1, 0, 0]),
+      [1, 0, 0]
+    );
+    const upOrtho = normalizeVecWithFallback(cross(rightSafe, dir), [0, 1, 0], [0, 1, 0]);
+    return { dir, right: rightSafe, upOrtho };
   }
 
   updateFromKeys(keys: Set<string>, deltaScale = 1): boolean {
@@ -102,20 +112,20 @@ export class CameraController {
       changed = true;
     }
 
+    if (keys.has("g")) {
+      this.rotateCameraAroundOrigin(basis.upOrtho, rotate);
+      changed = true;
+    }
+    if (keys.has("j")) {
+      this.rotateCameraAroundOrigin(basis.upOrtho, -rotate);
+      changed = true;
+    }
     if (keys.has("y")) {
-      this.orbitAroundEye(basis.upOrtho, rotate);
+      this.rotateCameraAroundOrigin(basis.right, rotate);
       changed = true;
     }
     if (keys.has("h")) {
-      this.orbitAroundEye(basis.upOrtho, -rotate);
-      changed = true;
-    }
-    if (keys.has("t")) {
-      this.orbitAroundEye(basis.right, rotate);
-      changed = true;
-    }
-    if (keys.has("g")) {
-      this.orbitAroundEye(basis.right, -rotate);
+      this.rotateCameraAroundOrigin(basis.right, -rotate);
       changed = true;
     }
     if (keys.has("q")) {
@@ -180,7 +190,7 @@ export class CameraController {
   }
 
   private roll(angle: number): void {
-    const dir = normalize(sub(this.state.target, this.state.eye));
+    const dir = this.ensureValidDirection();
     this.state.up = rotateAroundAxis(this.state.up, dir, angle);
   }
 
@@ -196,12 +206,43 @@ export class CameraController {
   }
 
   private orthogonalizeUp(): void {
-    const dir = normalize(sub(this.state.target, this.state.eye));
+    const dir = this.ensureValidDirection();
     const upNoDir = sub(this.state.up, scale(dir, dot3(this.state.up, dir)));
-    this.state.up = normalize(upNoDir);
+    const fallbackAxis: Vec3 = Math.abs(dir[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+    const fallbackRight = normalizeVecWithFallback(cross(dir, fallbackAxis), [1, 0, 0], [1, 0, 0]);
+    const fallbackUp = normalizeVecWithFallback(cross(fallbackRight, dir), [0, 1, 0], [0, 1, 0]);
+    this.state.up = normalizeVecWithFallback(upNoDir, fallbackUp, [0, 1, 0]);
+  }
+
+  private ensureValidDirection(): Vec3 {
+    const dirRaw = sub(this.state.target, this.state.eye);
+    const dirLen = vecLen(dirRaw);
+    if (Number.isFinite(dirLen) && dirLen > 1e-8) {
+      return [dirRaw[0] / dirLen, dirRaw[1] / dirLen, dirRaw[2] / dirLen];
+    }
+
+    // Recover from invalid persisted state where eye == target.
+    this.state.target = add(this.state.eye, [0, 0, 1]);
+    return [0, 0, 1];
   }
 }
 
 function dot3(a: Vec3, b: Vec3): number {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function vecLen(a: Vec3): number {
+  return Math.hypot(a[0], a[1], a[2]);
+}
+
+function normalizeVecWithFallback(value: Vec3, fallback: Vec3, finalFallback: Vec3): Vec3 {
+  const valueLen = vecLen(value);
+  if (Number.isFinite(valueLen) && valueLen > 1e-8) {
+    return [value[0] / valueLen, value[1] / valueLen, value[2] / valueLen];
+  }
+  const fallbackLen = vecLen(fallback);
+  if (Number.isFinite(fallbackLen) && fallbackLen > 1e-8) {
+    return [fallback[0] / fallbackLen, fallback[1] / fallbackLen, fallback[2] / fallbackLen];
+  }
+  return [...finalFallback];
 }

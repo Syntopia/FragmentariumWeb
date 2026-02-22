@@ -2,6 +2,7 @@ import type {
   ParseResult,
   ParserOptions,
   ParsedPreset,
+  SourceLineRef,
   UniformControl,
   UniformDefinition,
   UniformType,
@@ -37,6 +38,11 @@ interface ParsedUniform {
 interface GlobalUniformDependentInitializer {
   declarationLine: string;
   assignmentLines: string[];
+}
+
+interface ExpandedSourceLine {
+  text: string;
+  origin: SourceLineRef;
 }
 
 const lockTypes = new Set(["locked", "notlocked", "notlockable", "alwayslocked"]);
@@ -367,19 +373,24 @@ function parseAnnotatedUniform(
   throw new Error(`Unsupported uniform annotation: ${line}`);
 }
 
-function expandIncludes(
+function expandIncludesToLines(
   source: string,
   sourceName: string,
   includeMap: Record<string, string>,
   includeStack: string[]
-): string {
+): ExpandedSourceLine[] {
   const lines = toLines(source);
-  const expanded: string[] = [];
+  const expanded: ExpandedSourceLine[] = [];
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    const origin: SourceLineRef = {
+      path: sourceName,
+      line: lineIndex + 1
+    };
     const includeMatch = line.match(INCLUDE_DIRECTIVE);
     if (includeMatch === null) {
-      expanded.push(line);
+      expanded.push({ text: line, origin });
       continue;
     }
 
@@ -392,22 +403,21 @@ function expandIncludes(
       throw new Error(`Cyclic include detected: ${includeStack.join(" -> ")} -> ${includeName}`);
     }
 
-    expanded.push(`// #include \"${includeName}\"`);
-    expanded.push(
-      expandIncludes(includeSource, includeName, includeMap, [...includeStack, includeName])
-    );
-    expanded.push(`// #endinclude \"${includeName}\"`);
+    expanded.push({ text: `// #include \"${includeName}\"`, origin });
+    expanded.push(...expandIncludesToLines(includeSource, includeName, includeMap, [...includeStack, includeName]));
+    expanded.push({ text: `// #endinclude \"${includeName}\"`, origin });
   }
 
-  return expanded.join("\n");
+  return expanded;
 }
 
 export function parseFragmentSource(options: ParserOptions): ParseResult {
-  const expanded = expandIncludes(options.source, options.sourceName, options.includeMap, [options.sourceName]);
-  const lines = toLines(expanded);
+  const expandedLines = expandIncludesToLines(options.source, options.sourceName, options.includeMap, [options.sourceName]);
+  const lines = expandedLines.map((entry) => entry.text);
   const uniformNames = gatherUniformNames(lines);
 
   const outputLines: string[] = [];
+  const shaderLineMap: Array<SourceLineRef | null> = [];
   const uniforms: UniformDefinition[] = [];
   const presets: ParsedPreset[] = [];
   const groups = new Set<string>();
@@ -418,9 +428,14 @@ export function parseFragmentSource(options: ParserOptions): ParseResult {
   let inVertexBlock = false;
   let lastComment = "";
   let shaderScopeDepth = 0;
+  const pushOutputLine = (line: string, origin: SourceLineRef | null): void => {
+    outputLines.push(line);
+    shaderLineMap.push(origin);
+  };
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
+    const lineOrigin = expandedLines[i]?.origin ?? null;
     const trimmed = line.trim();
 
     if (VERTEX_START.test(trimmed)) {
@@ -478,7 +493,7 @@ export function parseFragmentSource(options: ParserOptions): ParseResult {
     const parsedUniform = parseAnnotatedUniform(line, currentGroup, lastComment);
     if (parsedUniform !== null) {
       uniforms.push(parsedUniform.definition);
-      outputLines.push(parsedUniform.shaderLine);
+      pushOutputLine(parsedUniform.shaderLine, lineOrigin);
       shaderScopeDepth += braceDelta(parsedUniform.shaderLine);
       lastComment = "";
       continue;
@@ -486,7 +501,7 @@ export function parseFragmentSource(options: ParserOptions): ParseResult {
 
     const fallbackUniformShaderLine = parseFallbackUniformShaderLine(line);
     if (fallbackUniformShaderLine !== null) {
-      outputLines.push(fallbackUniformShaderLine);
+      pushOutputLine(fallbackUniformShaderLine, lineOrigin);
       shaderScopeDepth += braceDelta(fallbackUniformShaderLine);
       lastComment = "";
       continue;
@@ -494,7 +509,7 @@ export function parseFragmentSource(options: ParserOptions): ParseResult {
 
     if (trimmed.startsWith("#")) {
       if (isPreservedPreprocessorDirective(trimmed)) {
-        outputLines.push(line);
+        pushOutputLine(line, lineOrigin);
         shaderScopeDepth += braceDelta(line);
       }
       continue;
@@ -503,7 +518,7 @@ export function parseFragmentSource(options: ParserOptions): ParseResult {
     if (shaderScopeDepth === 0) {
       const transformed = parseGlobalUniformDependentInitializer(line, uniformNames);
       if (transformed !== null) {
-        outputLines.push(transformed.declarationLine);
+        pushOutputLine(transformed.declarationLine, lineOrigin);
         for (const assignmentLine of transformed.assignmentLines) {
           globalInitAssignments.push(assignmentLine.trim());
         }
@@ -517,7 +532,7 @@ export function parseFragmentSource(options: ParserOptions): ParseResult {
       }
     }
 
-    outputLines.push(line);
+    pushOutputLine(line, lineOrigin);
     shaderScopeDepth += braceDelta(line);
 
     if (trimmed.startsWith("//")) {
@@ -528,18 +543,20 @@ export function parseFragmentSource(options: ParserOptions): ParseResult {
   }
 
   if (globalInitAssignments.length > 0) {
-    outputLines.push("");
-    outputLines.push("#define HAS_FRAGMENTARIUM_WEB_INIT_GLOBALS 1");
-    outputLines.push("void fragmentariumWebInitGlobalsImpl() {");
+    pushOutputLine("", null);
+    pushOutputLine("#define HAS_FRAGMENTARIUM_WEB_INIT_GLOBALS 1", null);
+    pushOutputLine("void fragmentariumWebInitGlobalsImpl() {", null);
     for (const assignment of globalInitAssignments) {
-      outputLines.push(`  ${assignment}`);
+      pushOutputLine(`  ${assignment}`, null);
     }
-    outputLines.push("}");
+    pushOutputLine("}", null);
   }
 
   groups.add("Default");
   return {
+    sourceName: options.sourceName,
     shaderSource: outputLines.join("\n"),
+    shaderLineMap,
     uniforms,
     presets,
     cameraMode,

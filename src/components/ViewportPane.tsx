@@ -1,6 +1,5 @@
 import {
   useCallback,
-  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
   useEffect,
@@ -9,11 +8,17 @@ import {
 } from "react";
 import { CameraController, type CameraState } from "../core/geometry/camera";
 import type { IntegratorDefinition, IntegratorOptionValues } from "../core/integrators/types";
-import type { UniformDefinition, UniformValue } from "../core/parser/types";
-import { FragmentRenderer, type RenderSettings, type RendererStatus } from "../core/render/renderer";
+import type { SourceLineRef, UniformDefinition, UniformValue } from "../core/parser/types";
+import {
+  FragmentRenderer,
+  type RenderSettings,
+  type RendererShaderErrorDetails,
+  type RendererStatus
+} from "../core/render/renderer";
 
 interface ViewportPaneProps {
   geometrySource: string;
+  geometryLineMap?: Array<SourceLineRef | null>;
   uniformDefinitions: UniformDefinition[];
   uniformValues: Record<string, UniformValue>;
   integrator: IntegratorDefinition;
@@ -23,10 +28,11 @@ interface ViewportPaneProps {
   onCameraChange: (state: CameraState) => void;
   onFocusDistance: (distance: number | null) => void;
   onStatus: (status: RendererStatus) => void;
-  onError: (message: string | null) => void;
+  onError: (error: RendererShaderErrorDetails | string | null) => void;
+  disableGlobalShortcuts?: boolean;
 }
 
-const movementKeys = new Set(["w", "a", "s", "d", "q", "e", "r", "c", "y", "h", "t", "g"]);
+const movementKeys = new Set(["w", "a", "s", "d", "q", "e", "r", "c", "y", "h", "g", "j"]);
 
 function isEditableEventTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) {
@@ -46,6 +52,7 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
   const rendererRef = useRef<FragmentRenderer | null>(null);
   const controllerRef = useRef<CameraController>(new CameraController());
   const pressedKeysRef = useRef<Set<string>>(new Set());
+  const modifierStateRef = useRef<{ shift: boolean; ctrl: boolean }>({ shift: false, ctrl: false });
   const isHoveringRef = useRef(false);
   const lastPointerUvRef = useRef<[number, number] | null>(null);
   const dragRef = useRef<{ pointerId: number; mode: "orbit" | "orbit-origin" | "pan" | "zoom" } | null>(null);
@@ -94,6 +101,7 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
     try {
       renderer.setScene({
         geometrySource: props.geometrySource,
+        geometryLineMap: props.geometryLineMap,
         uniformDefinitions: props.uniformDefinitions,
         uniformValues: props.uniformValues,
         integrator: props.integrator,
@@ -101,11 +109,16 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
       });
       props.onError(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      props.onError(message);
+      if (error instanceof Error && "details" in error && typeof (error as { details?: unknown }).details === "object") {
+        const details = (error as { details: RendererShaderErrorDetails }).details;
+        props.onError(details);
+      } else {
+        const message = error instanceof Error ? error.message : String(error);
+        props.onError(message);
+      }
       return;
     }
-  }, [sceneKey, props.geometrySource, props.integrator, props.onError, props.uniformDefinitions]);
+  }, [sceneKey, props.geometryLineMap, props.geometrySource, props.integrator, props.onError, props.uniformDefinitions]);
 
   useEffect(() => {
     rendererRef.current?.updateUniformValues(props.uniformValues);
@@ -149,10 +162,12 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
     const update = (now: number): void => {
       const controller = controllerRef.current;
       const keys = pressedKeysRef.current;
+      const modifiers = modifierStateRef.current;
+      const speedMultiplier = (modifiers.shift ? 0.2 : 1) * (modifiers.ctrl ? 5 : 1);
       const delta = Math.min((now - previous) / 16.666, 3);
       previous = now;
 
-      if (keys.size > 0 && controller.updateFromKeys(keys, delta)) {
+      if (!props.disableGlobalShortcuts && keys.size > 0 && controller.updateFromKeys(keys, delta * speedMultiplier)) {
         const next = controller.getState();
         rendererRef.current?.setCamera(next);
         props.onCameraChange(next);
@@ -163,7 +178,15 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
 
     raf = requestAnimationFrame(update);
     return () => cancelAnimationFrame(raf);
-  }, [props.onCameraChange]);
+  }, [props.disableGlobalShortcuts, props.onCameraChange]);
+
+  useEffect(() => {
+    if (!props.disableGlobalShortcuts) {
+      return;
+    }
+    pressedKeysRef.current.clear();
+    modifierStateRef.current = { shift: false, ctrl: false };
+  }, [props.disableGlobalShortcuts]);
 
   const pushCamera = (): void => {
     const next = controllerRef.current.getState();
@@ -211,27 +234,88 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
   }, [props.onFocusDistance]);
 
   useEffect(() => {
+    const setModifiersFromEvent = (event: KeyboardEvent): void => {
+      modifierStateRef.current = {
+        shift: event.shiftKey,
+        ctrl: event.ctrlKey
+      };
+    };
+
     const handleWindowKeyDown = (event: KeyboardEvent): void => {
-      if (event.key.toLowerCase() !== "f" || event.repeat) {
+      if (props.disableGlobalShortcuts) {
         return;
       }
-      if (!isHoveringRef.current) {
+      if (event.defaultPrevented) {
         return;
       }
       if (isEditableEventTarget(event.target)) {
         return;
       }
-      if (document.activeElement === canvasRef.current) {
+      setModifiersFromEvent(event);
+
+      const key = event.key.toLowerCase();
+
+      if (key === "f") {
+        if (!event.repeat) {
+          event.preventDefault();
+          requestFocusProbe();
+        }
         return;
       }
 
-      event.preventDefault();
-      requestFocusProbe();
+      if (key === "1") {
+        controllerRef.current.adjustStepSize(0.5);
+        event.preventDefault();
+        return;
+      }
+      if (key === "2") {
+        controllerRef.current.adjustStepSize(10);
+        event.preventDefault();
+        return;
+      }
+      if (key === "3") {
+        controllerRef.current.adjustStepSize(2);
+        event.preventDefault();
+        return;
+      }
+      if (key === "x") {
+        controllerRef.current.adjustStepSize(0.1);
+        event.preventDefault();
+        return;
+      }
+
+      if (movementKeys.has(key)) {
+        pressedKeysRef.current.add(key);
+        event.preventDefault();
+      }
+    };
+
+    const handleWindowKeyUp = (event: KeyboardEvent): void => {
+      setModifiersFromEvent(event);
+      if (props.disableGlobalShortcuts) {
+        return;
+      }
+      if (isEditableEventTarget(event.target)) {
+        return;
+      }
+      pressedKeysRef.current.delete(event.key.toLowerCase());
+    };
+
+    const handleWindowBlur = (): void => {
+      pressedKeysRef.current.clear();
+      modifierStateRef.current = { shift: false, ctrl: false };
+      dragRef.current = null;
     };
 
     window.addEventListener("keydown", handleWindowKeyDown);
-    return () => window.removeEventListener("keydown", handleWindowKeyDown);
-  }, [requestFocusProbe]);
+    window.addEventListener("keyup", handleWindowKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", handleWindowKeyDown);
+      window.removeEventListener("keyup", handleWindowKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [props.disableGlobalShortcuts, requestFocusProbe]);
 
   const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     const canvas = canvasRef.current;
@@ -286,48 +370,6 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
     pushCamera();
   };
 
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLCanvasElement>): void => {
-    const key = event.key.toLowerCase();
-
-    if (key === "f") {
-      if (!event.repeat) {
-        requestFocusProbe();
-      }
-      event.preventDefault();
-      return;
-    }
-
-    if (key === "1") {
-      controllerRef.current.adjustStepSize(0.5);
-      event.preventDefault();
-      return;
-    }
-    if (key === "2") {
-      controllerRef.current.adjustStepSize(10);
-      event.preventDefault();
-      return;
-    }
-    if (key === "3") {
-      controllerRef.current.adjustStepSize(2);
-      event.preventDefault();
-      return;
-    }
-    if (key === "x") {
-      controllerRef.current.adjustStepSize(0.1);
-      event.preventDefault();
-      return;
-    }
-
-    if (movementKeys.has(key)) {
-      pressedKeysRef.current.add(key);
-      event.preventDefault();
-    }
-  };
-
-  const onKeyUp = (event: ReactKeyboardEvent<HTMLCanvasElement>): void => {
-    pressedKeysRef.current.delete(event.key.toLowerCase());
-  };
-
   return (
     <div className="viewport-pane" ref={wrapperRef}>
       <canvas
@@ -345,8 +387,6 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onWheel={onWheel}
-        onKeyDown={onKeyDown}
-        onKeyUp={onKeyUp}
         onContextMenu={(event) => event.preventDefault()}
         onBlur={() => {
           pressedKeysRef.current.clear();

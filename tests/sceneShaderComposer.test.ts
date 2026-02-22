@@ -127,6 +127,33 @@ float DE(vec3 p) {
     expect(sources.fragmentSource).toContain("cameraRay(gl_FragCoord.xy, rayOrigin, rayDir);");
     expect(sources.fragmentSource).toContain("renderColor(rayOrigin, rayDir)");
   });
+
+  test("exposes fragment line map for geometry source diagnostics", () => {
+    const integrator = getIntegratorById("de-raytracer");
+    const geometrySource = `
+float helper() { return 1.0; }
+float DE(vec3 p) {
+  return length(p) - helper();
+}
+`;
+    const geometryLineMap = [
+      { path: "main.frag", line: 1 },
+      { path: "main.frag", line: 2 },
+      { path: "main.frag", line: 3 },
+      { path: "main.frag", line: 4 },
+      { path: "main.frag", line: 5 }
+    ];
+    const sources = buildSceneShaderSources({
+      geometrySource,
+      geometryLineMap,
+      integrator
+    });
+    expect(sources.fragmentLineMap).toBeDefined();
+    const fragmentLines = sources.fragmentSource.split(/\r\n|\r|\n/);
+    const deLineIndex = fragmentLines.findIndex((line) => line.includes("return length(p) - helper();"));
+    expect(deLineIndex).toBeGreaterThanOrEqual(0);
+    expect(sources.fragmentLineMap?.[deLineIndex]).toEqual({ path: "main.frag", line: 4 });
+  });
 });
 
 describe("buildFocusProbeShaderSources", () => {

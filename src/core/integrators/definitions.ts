@@ -396,13 +396,14 @@ float G_Smith_SchlickGGX(float nDotV, float nDotL, float alphaR) {
   return G_SchlickGGX(nDotV, alphaR) * G_SchlickGGX(nDotL, alphaR);
 }
 
-vec3 materialBaseColor() {
-  vec3 diffuseColor = clamp(
+vec3 materialBaseColor(vec3 p, vec3 n) {
+  vec3 systemBase = clamp(fragmentariumResolveBaseColor(p, n), vec3(0.0), vec3(1.0));
+  vec3 tint = clamp(
     vec3(uIntegrator_diffuseColorR, uIntegrator_diffuseColorG, uIntegrator_diffuseColorB),
     vec3(0.0),
     vec3(1.0)
   );
-  return applyOrbitTrapHueBlend(diffuseColor);
+  return applyOrbitTrapHueBlend(clamp(systemBase * tint, vec3(0.0), vec3(1.0)));
 }
 
 vec3 renderColor(vec3 ro, vec3 rd) {
@@ -422,7 +423,7 @@ vec3 renderColor(vec3 ro, vec3 rd) {
     return bg;
   }
 
-  vec3 baseCol = materialBaseColor();
+  vec3 baseCol = materialBaseColor(p, n);
   float m = clamp(uIntegrator_metalness, 0.0, 1.0);
   float r = clamp(uIntegrator_roughness, 0.0, 1.0);
   float alphaR = max(1.0e-3, r * r);
@@ -496,7 +497,7 @@ const deQualityOptionTemplate: IntegratorOptionDefinition[] = [
   { key: "orbitTrapHueOffset", label: "Trap Hue Shift", min: -1, max: 1, defaultValue: 0, step: 0.01 },
   { key: "orbitTrapHueScale", label: "Trap Hue Scale", min: -8, max: 8, defaultValue: 1, step: 0.01 },
   { key: "orbitTrapSaturation", label: "Trap Saturation", min: 0, max: 1, defaultValue: 1, step: 0.01 },
-  { key: "orbitTrapValue", label: "Trap Value", min: 0, max: 2, defaultValue: 1, step: 0.01 },
+  { key: "orbitTrapValue", label: "Trap Value", min: 0, max: 2, defaultValue: 0, step: 0.01 },
   { key: "orbitTrapMix", label: "Trap Mix", min: 0, max: 1, defaultValue: 1, step: 0.01 },
   { key: "metalness", label: "Metalness", min: 0, max: 1, defaultValue: 0.05, step: 0.01 },
   { key: "roughness", label: "Roughness", min: 0, max: 1, defaultValue: 0.35, step: 0.01 },
@@ -520,6 +521,9 @@ uniform float uIntegrator_albedo;
 uniform float uIntegrator_roughness;
 uniform float uIntegrator_metallic;
 uniform float uIntegrator_reflectivity;
+uniform float uIntegrator_diffuseColorR;
+uniform float uIntegrator_diffuseColorG;
+uniform float uIntegrator_diffuseColorB;
 uniform int uIntegrator_useOrbitTrap;
 uniform float uIntegrator_orbitTrapFalloff;
 uniform float uIntegrator_orbitTrapHueOffset;
@@ -544,6 +548,22 @@ uniform int uIntegrator_maxDistance;
 uniform float uIntegrator_sampleClamp;
 uniform float uIntegrator_sunAzimuth;
 uniform float uIntegrator_sunElevation;
+uniform int uIntegrator_iblEnabled;
+uniform float uIntegrator_iblStrength;
+uniform float uIntegrator_iblExposure;
+uniform float uIntegrator_iblRotationDeg;
+uniform float uIntegrator_iblHorizonGlow;
+uniform float uIntegrator_iblHotspotStrength;
+uniform float uIntegrator_iblHotspotSizeDeg;
+uniform float uIntegrator_iblTopColorR;
+uniform float uIntegrator_iblTopColorG;
+uniform float uIntegrator_iblTopColorB;
+uniform float uIntegrator_iblHorizonColorR;
+uniform float uIntegrator_iblHorizonColorG;
+uniform float uIntegrator_iblHorizonColorB;
+uniform float uIntegrator_iblGroundColorR;
+uniform float uIntegrator_iblGroundColorG;
+uniform float uIntegrator_iblGroundColorB;
 
 const int MAX_TRACE_STEPS = 1536;
 const int MAX_BOUNCES = 16;
@@ -555,6 +575,13 @@ vec3 computeSunDirection() {
   float el = radians(uIntegrator_sunElevation);
   float cosEl = cos(el);
   return normalize(vec3(sin(az) * cosEl, sin(el), cos(az) * cosEl));
+}
+
+vec3 rotateYDegrees(vec3 v, float deg) {
+  float a = radians(deg);
+  float c = cos(a);
+  float s = sin(a);
+  return vec3(c * v.x + s * v.z, v.y, -s * v.x + c * v.z);
 }
 
 float minDistPTPhys() {
@@ -799,6 +826,51 @@ vec3 skyRadiance(vec3 rd) {
   return mix(vec3(0.03, 0.05, 0.08), vec3(0.3, 0.4, 0.55), gradient) * uIntegrator_skyStrength;
 }
 
+vec3 iblRadiancePT(vec3 rd) {
+  if (uIntegrator_iblEnabled <= 0) {
+    return vec3(0.0);
+  }
+
+  vec3 d = normalize(rotateYDegrees(rd, uIntegrator_iblRotationDeg));
+  float skyT = clamp(d.y * 0.5 + 0.5, 0.0, 1.0);
+  float groundT = clamp((-d.y) * 0.5 + 0.5, 0.0, 1.0);
+
+  vec3 top = clamp(vec3(uIntegrator_iblTopColorR, uIntegrator_iblTopColorG, uIntegrator_iblTopColorB), vec3(0.0), vec3(8.0));
+  vec3 horizon = clamp(
+    vec3(uIntegrator_iblHorizonColorR, uIntegrator_iblHorizonColorG, uIntegrator_iblHorizonColorB),
+    vec3(0.0),
+    vec3(8.0)
+  );
+  vec3 ground = clamp(
+    vec3(uIntegrator_iblGroundColorR, uIntegrator_iblGroundColorG, uIntegrator_iblGroundColorB),
+    vec3(0.0),
+    vec3(8.0)
+  );
+
+  vec3 skyBand = mix(horizon, top, smoothstep(0.0, 1.0, skyT * skyT));
+  vec3 groundBand = mix(horizon, ground, smoothstep(0.0, 1.0, groundT * groundT));
+  vec3 env = d.y >= 0.0 ? skyBand : groundBand;
+
+  float horizonGlow = exp(-abs(d.y) * 24.0) * max(uIntegrator_iblHorizonGlow, 0.0);
+  env += horizon * horizonGlow;
+
+  float hotspotCos = cos(0.5 * radians(clamp(uIntegrator_iblHotspotSizeDeg, 0.1, 180.0)));
+  float hotspotAlign = dot(d, computeSunDirection());
+  float hotspot = smoothstep(hotspotCos, 1.0, hotspotAlign);
+  hotspot *= hotspot;
+  env += vec3(1.0, 0.96, 0.9) * max(uIntegrator_iblHotspotStrength, 0.0) * hotspot;
+
+  float gain = max(uIntegrator_iblStrength, 0.0) * exp2(uIntegrator_iblExposure);
+  return env * gain;
+}
+
+vec3 environmentRadiancePT(vec3 rd) {
+  if (uIntegrator_iblEnabled > 0) {
+    return iblRadiancePT(rd);
+  }
+  return skyRadiance(rd);
+}
+
 vec3 sunRadiance(vec3 rd) {
   float cosThetaMax = sunCosThetaMaxPT();
   float align = dot(normalize(rd), sunDirectionPT());
@@ -923,7 +995,7 @@ vec3 renderColor(vec3 ro, vec3 rd) {
     float hitT;
     bool hit = traceDE(origin, direction, hitPos, hitNormal, hitT);
     if (!hit) {
-      vec3 env = skyRadiance(direction);
+      vec3 env = environmentRadiancePT(direction);
 
       vec3 sunContrib = sunRadiance(direction);
       if (uIntegrator_directLight > 0 && bounce > 0 && lastPdf > 0.0) {
@@ -972,6 +1044,12 @@ vec3 renderColor(vec3 ro, vec3 rd) {
     vec3 n = hitNormal;
     vec3 v = normalize(-direction);
     vec3 base = clamp(fragmentariumResolveBaseColor(hitPos, n), vec3(0.0), vec3(1.0));
+    vec3 tint = clamp(
+      vec3(uIntegrator_diffuseColorR, uIntegrator_diffuseColorG, uIntegrator_diffuseColorB),
+      vec3(0.0),
+      vec3(1.0)
+    );
+    base = clamp(base * tint, vec3(0.0), vec3(1.0));
     base = applyOrbitTrapHueBlendPT(base);
     float roughness = clamp(uIntegrator_roughness, 0.02, 1.0);
     float metallic = clamp(uIntegrator_metallic, 0.0, 1.0);
@@ -1068,12 +1146,146 @@ vec3 renderColor(vec3 ro, vec3 rd) {
 }
 `;
 
+function integratorOptionGroupForKey(key: string): string {
+  if (key === "detailExp" || key === "detailAOExp" || key === "maxRaySteps" || key === "maxDistance" || key === "fudgeFactor") {
+    return "Tracing";
+  }
+  if (key === "aoStrength" || key === "aoSamples" || key === "shadowStrength" || key === "shadowSoftness") {
+    return "Shadows/AO";
+  }
+  if (key === "fog" || key === "backgroundStrength") {
+    return "Environment";
+  }
+  if (
+    key === "diffuseColorR" ||
+    key === "diffuseColorG" ||
+    key === "diffuseColorB" ||
+    key === "metalness" ||
+    key === "metallic" ||
+    key === "roughness" ||
+    key === "reflectivity" ||
+    key === "specularStrength" ||
+    key === "albedo" ||
+    key === "sssStrength" ||
+    key === "sssRadius"
+  ) {
+    return "Material";
+  }
+  if (key === "useOrbitTrap" || key.startsWith("orbitTrap")) {
+    return "Orbit Trap";
+  }
+  if (key === "directLight" || key.startsWith("sun") || key === "ambientStrength" || key === "skyStrength") {
+    return "Lighting";
+  }
+  if (key.startsWith("ibl")) {
+    return "IBL";
+  }
+  if (key.startsWith("areaLight")) {
+    return "Area Light";
+  }
+  if (key === "aperture" || key === "focalDistance" || key === "aaJitter") {
+    return "Camera";
+  }
+  return "General";
+}
+
+function integratorSharedSemanticForKey(key: string): string | null {
+  if (key === "metalness" || key === "metallic") {
+    return "material.metalness";
+  }
+  if (key === "reflectivity") {
+    return "material.reflectivity";
+  }
+  if (key === "roughness") {
+    return "material.roughness";
+  }
+  if (key === "diffuseColorR") {
+    return "material.tint.r";
+  }
+  if (key === "diffuseColorG") {
+    return "material.tint.g";
+  }
+  if (key === "diffuseColorB") {
+    return "material.tint.b";
+  }
+  if (key === "useOrbitTrap") {
+    return "orbit.enable";
+  }
+  if (key.startsWith("orbitTrap")) {
+    return `orbit.${key}`;
+  }
+  if (key === "sunAzimuth" || key === "sunElevation" || key === "sunStrength") {
+    return `light.${key}`;
+  }
+  if (key === "aperture" || key === "focalDistance" || key === "aaJitter") {
+    return `camera.${key}`;
+  }
+  if (key === "maxDistance" || key === "fudgeFactor" || key === "detailExp" || key === "maxRaySteps") {
+    return `trace.${key}`;
+  }
+  return null;
+}
+
+function decorateIntegratorOptions(options: IntegratorOptionDefinition[]): IntegratorOptionDefinition[] {
+  return options.map((option) => ({
+    ...option,
+    group: option.group ?? integratorOptionGroupForKey(option.key),
+    sharedSemantic: option.sharedSemantic ?? (integratorSharedSemanticForKey(option.key) ?? undefined)
+  }));
+}
+
+function clampOptionValue(option: IntegratorOptionDefinition, value: number): number {
+  let next = Number.isFinite(value) ? value : option.defaultValue;
+  next = Math.max(option.min, Math.min(option.max, next));
+  const isInt = option.step === 1 && Number.isInteger(option.defaultValue);
+  return isInt ? Math.round(next) : next;
+}
+
+export function transferSharedIntegratorOptions(
+  fromIntegratorId: string,
+  fromValues: IntegratorOptionValues,
+  toIntegratorId: string,
+  targetValues: IntegratorOptionValues
+): IntegratorOptionValues {
+  if (fromIntegratorId === toIntegratorId) {
+    return { ...targetValues };
+  }
+  const from = getIntegratorById(fromIntegratorId);
+  const to = getIntegratorById(toIntegratorId);
+
+  const semanticValues = new Map<string, number>();
+  for (const option of from.options) {
+    if (option.sharedSemantic === undefined) {
+      continue;
+    }
+    const value = fromValues[option.key];
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      continue;
+    }
+    semanticValues.set(option.sharedSemantic, value);
+  }
+
+  const next: IntegratorOptionValues = { ...targetValues };
+  for (const option of to.options) {
+    if (option.sharedSemantic === undefined) {
+      continue;
+    }
+    const value = semanticValues.get(option.sharedSemantic);
+    if (value === undefined) {
+      continue;
+    }
+    next[option.key] = clampOptionValue(option, value);
+  }
+
+  return next;
+}
+
 export const INTEGRATORS: IntegratorDefinition[] = [
   {
     id: "fast-raymarch",
     name: "Fast Raymarch",
     description: "DE surface raymarcher tuned for high interactivity.",
-    options: buildFastOptions({
+    options: decorateIntegratorOptions(buildFastOptions({
       detailAOExp: -1.6,
       maxRaySteps: 128,
       maxDistance: 500,
@@ -1082,21 +1294,21 @@ export const INTEGRATORS: IntegratorDefinition[] = [
       shadowStrength: 0.2,
       fog: 0.08,
       backgroundStrength: 0.2
-    }),
+    })),
     glsl: deFastRaymarchGlsl
   },
   {
     id: "de-raytracer",
     name: "DE Raytracer (Quality)",
     description: "Cook-Torrance GGX shading with metalness/roughness and optional orbit-trap hue blending.",
-    options: deQualityOptionTemplate,
+    options: decorateIntegratorOptions(deQualityOptionTemplate),
     glsl: deQualityRaytracerPbrGlsl
   },
   {
     id: "de-pathtracer-physical",
     name: "DE Path Tracer (Physical)",
     description: "Corrected path tracer with GGX+Lambert BSDF, MIS sun lighting, and improved energy handling.",
-    options: [
+    options: decorateIntegratorOptions([
       { key: "detailExp", label: "Detail", min: -7, max: 0, defaultValue: -2.7, step: 0.01 },
       { key: "maxRaySteps", label: "Max Steps", min: 16, max: 1536, defaultValue: 200, step: 1 },
       { key: "fudgeFactor", label: "Fudge Factor", min: 0.25, max: 2, defaultValue: 1, step: 0.01 },
@@ -1105,18 +1317,37 @@ export const INTEGRATORS: IntegratorDefinition[] = [
       { key: "roughness", label: "Roughness", min: 0.02, max: 1, defaultValue: 0.35, step: 0.01 },
       { key: "metallic", label: "Metallic", min: 0, max: 1, defaultValue: 0, step: 0.01 },
       { key: "reflectivity", label: "Reflectivity", min: 0, max: 1, defaultValue: 0.5, step: 0.01 },
+      { key: "diffuseColorR", label: "Diffuse R", min: 0, max: 1, defaultValue: 0.9, step: 0.01 },
+      { key: "diffuseColorG", label: "Diffuse G", min: 0, max: 1, defaultValue: 0.82, step: 0.01 },
+      { key: "diffuseColorB", label: "Diffuse B", min: 0, max: 1, defaultValue: 0.72, step: 0.01 },
       { key: "useOrbitTrap", label: "Use Orbit Trap", min: 0, max: 1, defaultValue: 1, step: 1 },
       { key: "orbitTrapFalloff", label: "Trap Falloff", min: 0.1, max: 24, defaultValue: 5.5, step: 0.01 },
       { key: "orbitTrapHueOffset", label: "Trap Hue Shift", min: -1, max: 1, defaultValue: 0, step: 0.01 },
       { key: "orbitTrapHueScale", label: "Trap Hue Scale", min: -8, max: 8, defaultValue: 1, step: 0.01 },
       { key: "orbitTrapSaturation", label: "Trap Saturation", min: 0, max: 1, defaultValue: 1, step: 0.01 },
-      { key: "orbitTrapValue", label: "Trap Value", min: 0, max: 2, defaultValue: 1, step: 0.01 },
+      { key: "orbitTrapValue", label: "Trap Value", min: 0, max: 2, defaultValue: 0, step: 0.01 },
       { key: "orbitTrapMix", label: "Trap Mix", min: 0, max: 1, defaultValue: 1, step: 0.01 },
       { key: "directLight", label: "Direct Light", min: 0, max: 1, defaultValue: 1, step: 1 },
       { key: "sunAzimuth", label: "Sun Azimuth", min: 0, max: 360, defaultValue: 20, step: 0.1 },
       { key: "sunElevation", label: "Sun Elevation", min: -10, max: 90, defaultValue: 45, step: 0.1 },
       { key: "sunStrength", label: "Sun Strength", min: 0, max: 20, defaultValue: 6, step: 0.01 },
       { key: "skyStrength", label: "Sky Strength", min: 0, max: 5, defaultValue: 1, step: 0.01 },
+      { key: "iblEnabled", label: "IBL Enabled", min: 0, max: 1, defaultValue: 1, step: 1 },
+      { key: "iblStrength", label: "IBL Strength", min: 0, max: 20, defaultValue: 1, step: 0.01 },
+      { key: "iblExposure", label: "IBL Exposure", min: -8, max: 8, defaultValue: 0, step: 0.01 },
+      { key: "iblRotationDeg", label: "IBL Rotate", min: 0, max: 360, defaultValue: 0, step: 0.1 },
+      { key: "iblHorizonGlow", label: "IBL Horizon Glow", min: 0, max: 4, defaultValue: 0.4, step: 0.01 },
+      { key: "iblHotspotStrength", label: "IBL Hotspot", min: 0, max: 20, defaultValue: 0.8, step: 0.01 },
+      { key: "iblHotspotSizeDeg", label: "IBL Hotspot Size", min: 0.1, max: 90, defaultValue: 12, step: 0.1 },
+      { key: "iblTopColorR", label: "IBL Top R", min: 0, max: 2, defaultValue: 0.2, step: 0.01 },
+      { key: "iblTopColorG", label: "IBL Top G", min: 0, max: 2, defaultValue: 0.35, step: 0.01 },
+      { key: "iblTopColorB", label: "IBL Top B", min: 0, max: 2, defaultValue: 0.55, step: 0.01 },
+      { key: "iblHorizonColorR", label: "IBL Horizon R", min: 0, max: 4, defaultValue: 0.9, step: 0.01 },
+      { key: "iblHorizonColorG", label: "IBL Horizon G", min: 0, max: 4, defaultValue: 0.85, step: 0.01 },
+      { key: "iblHorizonColorB", label: "IBL Horizon B", min: 0, max: 4, defaultValue: 0.75, step: 0.01 },
+      { key: "iblGroundColorR", label: "IBL Ground R", min: 0, max: 2, defaultValue: 0.05, step: 0.01 },
+      { key: "iblGroundColorG", label: "IBL Ground G", min: 0, max: 2, defaultValue: 0.06, step: 0.01 },
+      { key: "iblGroundColorB", label: "IBL Ground B", min: 0, max: 2, defaultValue: 0.08, step: 0.01 },
       {
         key: "sunAngularDiameterDeg",
         label: "Sun Diameter",
@@ -1139,7 +1370,7 @@ export const INTEGRATORS: IntegratorDefinition[] = [
       { key: "aaJitter", label: "AA Jitter", min: 0, max: 2, defaultValue: 1, step: 0.01 },
       { key: "maxDistance", label: "Max Distance", min: 50, max: 5000, defaultValue: 1500, step: 1 },
       { key: "sampleClamp", label: "Sample Clamp", min: 0, max: 64, defaultValue: 3.0, step: 0.1 }
-    ],
+    ]),
     glsl: dePathTracerPhysicalGlsl
   }
 ];

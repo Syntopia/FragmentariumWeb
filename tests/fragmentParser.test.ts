@@ -24,6 +24,7 @@ Toggle = false
     });
 
     expect(result.cameraMode).toBe("3D");
+    expect(result.sourceName).toBe("main.frag");
     expect(result.uniforms.map((entry) => entry.name)).toEqual(["Radius", "Toggle", "Tint"]);
 
     const radius = result.uniforms.find((entry) => entry.name === "Radius");
@@ -37,6 +38,10 @@ Toggle = false
 
     expect(result.shaderSource).toContain("uniform float Radius;");
     expect(result.shaderSource).toContain("uniform vec3 Tint;");
+    const shaderLines = result.shaderSource.split(/\r\n|\r|\n/);
+    const tintLineIndex = shaderLines.findIndex((line) => line.includes("uniform vec3 Tint;"));
+    expect(tintLineIndex).toBeGreaterThanOrEqual(0);
+    expect(result.shaderLineMap[tintLineIndex]).toEqual({ path: "extra.frag", line: 1 });
   });
 
   test("throws for unresolved include", () => {

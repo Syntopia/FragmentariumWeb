@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { AppButton } from "./AppButton";
 
 interface ConfirmDeleteLocalSystemDialogProps {
   open: boolean;
@@ -38,17 +39,16 @@ export function ConfirmDeleteLocalSystemDialog(
         aria-modal="true"
         aria-labelledby="delete-local-dialog-title"
       >
-        <h3 id="delete-local-dialog-title">Delete Local System</h3>
+        <h3 id="delete-local-dialog-title">Delete Session</h3>
         <p className="muted">This action cannot be undone.</p>
-        <p className="dialog-warning">Delete `{props.localPath}` from local storage?</p>
+        <p className="dialog-warning">Delete session `{props.localPath}`?</p>
         <div className="modal-actions">
-          <button type="button" onClick={props.onCancel}>
+          <AppButton onClick={props.onCancel}>
             Cancel
-          </button>
-          <button
+          </AppButton>
+          <AppButton
             ref={deleteButtonRef}
-            type="button"
-            className="button-danger"
+            variant="danger"
             onClick={props.onConfirm}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
@@ -58,7 +58,7 @@ export function ConfirmDeleteLocalSystemDialog(
             }}
           >
             Delete
-          </button>
+          </AppButton>
         </div>
       </div>
     </div>

@@ -4,6 +4,11 @@ export type UniformControl = "slider" | "checkbox" | "color";
 
 export type UniformValue = number | boolean | number[];
 
+export interface SourceLineRef {
+  path: string;
+  line: number;
+}
+
 export interface UniformDefinition {
   name: string;
   type: UniformType;
@@ -23,7 +28,9 @@ export interface ParsedPreset {
 }
 
 export interface ParseResult {
+  sourceName: string;
   shaderSource: string;
+  shaderLineMap: Array<SourceLineRef | null>;
   uniforms: UniformDefinition[];
   presets: ParsedPreset[];
   cameraMode: "2D" | "3D";

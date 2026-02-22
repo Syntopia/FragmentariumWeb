@@ -27,6 +27,27 @@ export function applyPresetValues(
   return next;
 }
 
+export function resolvePresetUniformValues(
+  definitions: UniformDefinition[],
+  presets: ParsedPreset[],
+  presetName: string | null
+): Record<string, UniformValue> {
+  const defaults = getDefaultUniformValues(definitions);
+  let next = defaults;
+  if (presetName === null) {
+    return defaults;
+  }
+
+  for (const preset of presets) {
+    next = applyPresetValues(definitions, next, preset);
+    if (preset.name === presetName) {
+      return next;
+    }
+  }
+
+  return defaults;
+}
+
 export function sanitizeUniformValue(
   definition: UniformDefinition,
   value: UniformValue

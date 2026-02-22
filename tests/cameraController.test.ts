@@ -71,4 +71,61 @@ describe("cameraController", () => {
     ];
     expect(dot3(strafeDelta, basisAfterForward.right)).toBeGreaterThan(0);
   });
+
+  test("uses GJ/YH to rotate camera and target around origin (same as shift-drag semantics)", () => {
+    const controller = new CameraController();
+    controller.setState({
+      eye: [1.65, -1.23, 0.27],
+      target: [-0.1, 0.1, 0],
+      up: [0.5, 0.2, -0.8],
+      fov: 0.62
+    });
+
+    const before = controller.getState();
+    const eyeRadiusBefore = Math.hypot(
+      before.eye[0] - before.target[0],
+      before.eye[1] - before.target[1],
+      before.eye[2] - before.target[2]
+    );
+    const targetOriginRadiusBefore = Math.hypot(before.target[0], before.target[1], before.target[2]);
+    const eyeOriginRadiusBefore = Math.hypot(before.eye[0], before.eye[1], before.eye[2]);
+
+    const changed = controller.updateFromKeys(new Set(["g", "y"]), 1);
+    const after = controller.getState();
+    const eyeRadiusAfter = Math.hypot(
+      after.eye[0] - after.target[0],
+      after.eye[1] - after.target[1],
+      after.eye[2] - after.target[2]
+    );
+    const targetOriginRadiusAfter = Math.hypot(after.target[0], after.target[1], after.target[2]);
+    const eyeOriginRadiusAfter = Math.hypot(after.eye[0], after.eye[1], after.eye[2]);
+
+    expect(changed).toBe(true);
+    expect(after.target).not.toEqual(before.target);
+    expect(after.eye).not.toEqual(before.eye);
+    expect(eyeRadiusAfter).toBeCloseTo(eyeRadiusBefore, 6);
+    expect(targetOriginRadiusAfter).toBeCloseTo(targetOriginRadiusBefore, 6);
+    expect(eyeOriginRadiusAfter).toBeCloseTo(eyeOriginRadiusBefore, 6);
+  });
+
+  test("sanitizes degenerate camera state from persisted values", () => {
+    const controller = new CameraController();
+
+    expect(() =>
+      controller.setState({
+        eye: [1, 2, 3],
+        target: [1, 2, 3], // invalid: zero-length view direction
+        up: [0, 0, 1], // also parallel to fallback direction after repair
+        fov: 0.5
+      })
+    ).not.toThrow();
+
+    const state = controller.getState();
+    expect(state.target).not.toEqual(state.eye);
+
+    expect(() => controller.getBasis()).not.toThrow();
+    const basis = controller.getBasis();
+    expect(Number.isFinite(basis.dir[0])).toBe(true);
+    expect(Number.isFinite(basis.upOrtho[1])).toBe(true);
+  });
 });
