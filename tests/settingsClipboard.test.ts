@@ -40,6 +40,10 @@ describe("settingsClipboard", () => {
         target: [0, 0, 0],
         up: [0, 1, 0],
         fov: 0.62
+      },
+      slicePlaneLockFrame: {
+        origin: [0.5, 1.25, -2],
+        normal: [0, 0, 1]
       }
     });
 
@@ -50,6 +54,10 @@ describe("settingsClipboard", () => {
     expect(parsed.renderSettings.maxSubframes).toBe(45);
     expect(parsed.uniformValues.Eye).toEqual([1.2, -0.6, 3.4]);
     expect(parsed.systemDefinition?.sourcePath).toBe("mandelbulb.frag");
+    expect(parsed.slicePlaneLockFrame).toEqual({
+      origin: [0.5, 1.25, -2],
+      normal: [0, 0, 1]
+    });
   });
 
   test("rejects payloads with an invalid format marker", () => {
@@ -124,6 +132,32 @@ describe("settingsClipboard", () => {
     });
 
     expect(serializeSettingsClipboardPayloadForSessionComparison(sameContentDifferentMetadata)).toBe(
+      serializeSettingsClipboardPayloadForSessionComparison(base)
+    );
+  });
+
+  test("session comparison includes slice plane lock frame", () => {
+    const base = buildSettingsClipboardPayload({
+      selectedPresetName: null,
+      integratorId: "de-raytracer",
+      integratorOptions: {},
+      renderSettings: DEFAULT_RENDER_SETTINGS,
+      uniformValues: {},
+      camera: { eye: [0, 0, -6], target: [0, 0, 0], up: [0, 1, 0], fov: 0.4 },
+      slicePlaneLockFrame: {
+        origin: [1, 2, 3],
+        normal: [0, 1, 0]
+      }
+    });
+    const changed = buildSettingsClipboardPayload({
+      ...base,
+      slicePlaneLockFrame: {
+        origin: [1, 2, 4],
+        normal: [0, 1, 0]
+      }
+    });
+
+    expect(serializeSettingsClipboardPayloadForSessionComparison(changed)).not.toBe(
       serializeSettingsClipboardPayloadForSessionComparison(base)
     );
   });

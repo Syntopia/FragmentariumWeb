@@ -1,7 +1,7 @@
 import { getDefaultIntegratorOptions, getIntegratorById } from "../core/integrators/definitions";
 import type { IntegratorOptionValues } from "../core/integrators/types";
 import type { UniformValue } from "../core/parser/types";
-import type { RenderSettings } from "../core/render/renderer";
+import type { RenderSettings, SlicePlaneLockFrame } from "../core/render/renderer";
 import type { CameraState } from "../core/geometry/camera";
 
 export const SETTINGS_CLIPBOARD_FORMAT = "fragmentarium-web-settings-v1";
@@ -21,6 +21,7 @@ export interface SettingsClipboardPayload {
   renderSettings: RenderSettings;
   uniformValues: Record<string, UniformValue>;
   camera: CameraState;
+  slicePlaneLockFrame?: SlicePlaneLockFrame | null;
   systemDefinition?: SettingsClipboardSystemDefinition;
 }
 
@@ -31,6 +32,7 @@ interface BuildSettingsClipboardPayloadArgs {
   renderSettings: RenderSettings;
   uniformValues: Record<string, UniformValue>;
   camera: CameraState;
+  slicePlaneLockFrame?: SlicePlaneLockFrame | null;
   systemDefinition?: SettingsClipboardSystemDefinition;
 }
 
@@ -76,6 +78,22 @@ function asCameraState(value: unknown): CameraState {
   const fov = asFiniteNumber(value.fov, "camera.fov");
 
   return { eye, target, up, fov };
+}
+
+function asSlicePlaneLockFrame(value: unknown): SlicePlaneLockFrame | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    throw new Error("Invalid 'slicePlaneLockFrame' value in clipboard payload.");
+  }
+  return {
+    origin: asVec3(value.origin, "slicePlaneLockFrame.origin"),
+    normal: asVec3(value.normal, "slicePlaneLockFrame.normal")
+  };
 }
 
 function asVec3(value: unknown, fieldName: string): [number, number, number] {
@@ -214,7 +232,16 @@ export function buildSettingsClipboardPayload(
       target: [...args.camera.target],
       up: [...args.camera.up],
       fov: args.camera.fov
-    }
+    },
+    slicePlaneLockFrame:
+      args.slicePlaneLockFrame === undefined
+        ? undefined
+        : args.slicePlaneLockFrame === null
+          ? null
+          : {
+              origin: [...args.slicePlaneLockFrame.origin],
+              normal: [...args.slicePlaneLockFrame.normal]
+            }
   };
 
   if (args.systemDefinition !== undefined) {
@@ -242,6 +269,7 @@ function buildSessionComparisonShape(payload: SettingsClipboardPayload): unknown
     renderSettings: payload.renderSettings,
     uniformValues: payload.uniformValues,
     camera: payload.camera,
+    slicePlaneLockFrame: payload.slicePlaneLockFrame,
     systemDefinition:
       payload.systemDefinition === undefined
         ? undefined
@@ -285,6 +313,7 @@ export function parseSettingsClipboardPayload(raw: string): SettingsClipboardPay
     renderSettings: asRenderSettings(parsed.renderSettings),
     uniformValues: asUniformValueMap(parsed.uniformValues),
     camera: asCameraState(parsed.camera),
+    slicePlaneLockFrame: asSlicePlaneLockFrame(parsed.slicePlaneLockFrame),
     systemDefinition: asSystemDefinition(parsed.systemDefinition)
   };
 }

@@ -189,7 +189,11 @@ const deFastOptionTemplate: IntegratorOptionDefinition[] = [
   { key: "sunElevation", label: "Sun Elevation", min: -10, max: 90, defaultValue: 45, step: 0.1 },
   { key: "aperture", label: "Aperture", min: 0, max: 0.2, defaultValue: 0, step: 0.0001 },
   { key: "focalDistance", label: "Focal Dist", min: 0.05, max: 4000, defaultValue: 6, step: 0.01 },
-  { key: "aaJitter", label: "AA Jitter", min: 0, max: 2, defaultValue: 1, step: 0.01 }
+  { key: "aaJitter", label: "AA Jitter", min: 0, max: 2, defaultValue: 1, step: 0.01 },
+  { key: "slicePlaneEnabled", label: "Slice Plane", min: 0, max: 1, defaultValue: 0, step: 1 },
+  { key: "slicePlaneDistance", label: "Slice Dist", min: 0, max: 20, defaultValue: 2, step: 0.01 },
+  { key: "slicePlaneLock", label: "Slice Lock", min: 0, max: 1, defaultValue: 0, step: 1 },
+  { key: "slicePlaneKeepFarSide", label: "Slice Keep Far", min: 0, max: 1, defaultValue: 1, step: 1 }
 ];
 
 function buildFastOptions(defaultOverrides: Record<string, number>): IntegratorOptionDefinition[] {
@@ -504,6 +508,10 @@ const deQualityOptionTemplate: IntegratorOptionDefinition[] = [
   { key: "aperture", label: "Aperture", min: 0, max: 0.2, defaultValue: 0, step: 0.0001 },
   { key: "focalDistance", label: "Focal Dist", min: 0.05, max: 4000, defaultValue: 6, step: 0.01 },
   { key: "aaJitter", label: "AA Jitter", min: 0, max: 2, defaultValue: 1, step: 0.01 },
+  { key: "slicePlaneEnabled", label: "Slice Plane", min: 0, max: 1, defaultValue: 0, step: 1 },
+  { key: "slicePlaneDistance", label: "Slice Dist", min: 0, max: 20, defaultValue: 2, step: 0.01 },
+  { key: "slicePlaneLock", label: "Slice Lock", min: 0, max: 1, defaultValue: 0, step: 1 },
+  { key: "slicePlaneKeepFarSide", label: "Slice Keep Far", min: 0, max: 1, defaultValue: 1, step: 1 },
   { key: "sunStrength", label: "Sun Strength", min: 0, max: 20, defaultValue: 4.5, step: 0.01 },
   { key: "ambientStrength", label: "Ambient", min: 0, max: 3, defaultValue: 0.8, step: 0.01 },
   { key: "specularStrength", label: "Specular", min: 0, max: 3, defaultValue: 1.0, step: 0.01 },
@@ -1183,7 +1191,15 @@ function integratorOptionGroupForKey(key: string): string {
   if (key.startsWith("areaLight")) {
     return "Area Light";
   }
-  if (key === "aperture" || key === "focalDistance" || key === "aaJitter") {
+  if (
+    key === "aperture" ||
+    key === "focalDistance" ||
+    key === "aaJitter" ||
+    key === "slicePlaneEnabled" ||
+    key === "slicePlaneDistance" ||
+    key === "slicePlaneLock" ||
+    key === "slicePlaneKeepFarSide"
+  ) {
     return "Camera";
   }
   return "General";
@@ -1216,6 +1232,18 @@ function integratorSharedSemanticForKey(key: string): string | null {
   }
   if (key === "sunAzimuth" || key === "sunElevation" || key === "sunStrength") {
     return `light.${key}`;
+  }
+  if (key === "slicePlaneEnabled") {
+    return "camera.slicePlaneEnabled";
+  }
+  if (key === "slicePlaneDistance") {
+    return "camera.slicePlaneDistance";
+  }
+  if (key === "slicePlaneLock") {
+    return "camera.slicePlaneLock";
+  }
+  if (key === "slicePlaneKeepFarSide") {
+    return "camera.slicePlaneKeepFarSide";
   }
   if (key === "aperture" || key === "focalDistance" || key === "aaJitter") {
     return `camera.${key}`;
@@ -1368,6 +1396,10 @@ export const INTEGRATORS: IntegratorDefinition[] = [
       { key: "aperture", label: "Aperture", min: 0, max: 0.2, defaultValue: 0, step: 0.0001 },
       { key: "focalDistance", label: "Focal Dist", min: 0.05, max: 4000, defaultValue: 6, step: 0.01 },
       { key: "aaJitter", label: "AA Jitter", min: 0, max: 2, defaultValue: 1, step: 0.01 },
+      { key: "slicePlaneEnabled", label: "Slice Plane", min: 0, max: 1, defaultValue: 0, step: 1 },
+      { key: "slicePlaneDistance", label: "Slice Dist", min: 0, max: 20, defaultValue: 2, step: 0.01 },
+      { key: "slicePlaneLock", label: "Slice Lock", min: 0, max: 1, defaultValue: 0, step: 1 },
+      { key: "slicePlaneKeepFarSide", label: "Slice Keep Far", min: 0, max: 1, defaultValue: 1, step: 1 },
       { key: "maxDistance", label: "Max Distance", min: 50, max: 5000, defaultValue: 1500, step: 1 },
       { key: "sampleClamp", label: "Sample Clamp", min: 0, max: 64, defaultValue: 3.0, step: 0.1 }
     ]),

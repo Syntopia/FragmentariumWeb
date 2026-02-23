@@ -12,6 +12,7 @@ import type { SourceLineRef, UniformDefinition, UniformValue } from "../core/par
 import {
   FragmentRenderer,
   type RenderSettings,
+  type SlicePlaneLockFrame,
   type RendererShaderErrorDetails,
   type RendererStatus
 } from "../core/render/renderer";
@@ -25,6 +26,7 @@ interface ViewportPaneProps {
   integratorOptions: IntegratorOptionValues;
   renderSettings: RenderSettings;
   cameraState: CameraState;
+  slicePlaneLockFrame: SlicePlaneLockFrame | null;
   onCameraChange: (state: CameraState) => void;
   onFocusDistance: (distance: number | null) => void;
   onStatus: (status: RendererStatus) => void;
@@ -127,6 +129,10 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
   useEffect(() => {
     rendererRef.current?.updateIntegratorOptions(props.integratorOptions);
   }, [props.integratorOptions]);
+
+  useEffect(() => {
+    rendererRef.current?.updateSlicePlaneLockFrame(props.slicePlaneLockFrame);
+  }, [props.slicePlaneLockFrame]);
 
   useEffect(() => {
     rendererRef.current?.setRenderSettings(props.renderSettings);

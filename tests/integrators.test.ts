@@ -17,12 +17,20 @@ describe("integrators", () => {
     expect(fast.options.some((option) => option.key === "aperture")).toBe(true);
     expect(fast.options.some((option) => option.key === "focalDistance")).toBe(true);
     expect(fast.options.some((option) => option.key === "aaJitter")).toBe(true);
+    expect(fast.options.some((option) => option.key === "slicePlaneEnabled")).toBe(true);
+    expect(fast.options.some((option) => option.key === "slicePlaneDistance")).toBe(true);
+    expect(fast.options.some((option) => option.key === "slicePlaneLock")).toBe(true);
+    expect(fast.options.some((option) => option.key === "slicePlaneKeepFarSide")).toBe(true);
     expect(quality.options.some((option) => option.key === "maxDistance")).toBe(true);
     expect(quality.options.some((option) => option.key === "aoSamples")).toBe(true);
     expect(quality.options.some((option) => option.key === "metalness")).toBe(true);
     expect(quality.options.some((option) => option.key === "roughness")).toBe(true);
     expect(quality.options.some((option) => option.key === "useOrbitTrap")).toBe(true);
     expect(quality.options.some((option) => option.key === "diffuseColorR")).toBe(true);
+    expect(quality.options.some((option) => option.key === "slicePlaneEnabled")).toBe(true);
+    expect(quality.options.some((option) => option.key === "slicePlaneDistance")).toBe(true);
+    expect(quality.options.some((option) => option.key === "slicePlaneLock")).toBe(true);
+    expect(quality.options.some((option) => option.key === "slicePlaneKeepFarSide")).toBe(true);
 
     const qualityDefaults = getDefaultIntegratorOptions("de-raytracer");
     expect(qualityDefaults.useOrbitTrap).toBe(1);
@@ -37,6 +45,10 @@ describe("integrators", () => {
     expect(qualityDefaults.aperture).toBe(0);
     expect(qualityDefaults.focalDistance).toBe(6);
     expect(qualityDefaults.aaJitter).toBe(1);
+    expect(qualityDefaults.slicePlaneEnabled).toBe(0);
+    expect(qualityDefaults.slicePlaneDistance).toBe(2);
+    expect(qualityDefaults.slicePlaneLock).toBe(0);
+    expect(qualityDefaults.slicePlaneKeepFarSide).toBe(1);
   });
 
   test("does not register the legacy non-physical DE path tracer", () => {
@@ -73,6 +85,10 @@ describe("integrators", () => {
     expect(integrator.options.some((option) => option.key === "aperture")).toBe(true);
     expect(integrator.options.some((option) => option.key === "focalDistance")).toBe(true);
     expect(integrator.options.some((option) => option.key === "aaJitter")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "slicePlaneEnabled")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "slicePlaneDistance")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "slicePlaneLock")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "slicePlaneKeepFarSide")).toBe(true);
 
     const defaults = getDefaultIntegratorOptions("de-pathtracer-physical");
     expect(defaults.bounceCount).toBe(3);
@@ -107,6 +123,10 @@ describe("integrators", () => {
     expect(defaults.aperture).toBe(0);
     expect(defaults.focalDistance).toBe(6);
     expect(defaults.aaJitter).toBe(1);
+    expect(defaults.slicePlaneEnabled).toBe(0);
+    expect(defaults.slicePlaneDistance).toBe(2);
+    expect(defaults.slicePlaneLock).toBe(0);
+    expect(defaults.slicePlaneKeepFarSide).toBe(1);
   });
 
   test("throws for unknown integrator id", () => {
@@ -129,7 +149,11 @@ describe("integrators", () => {
         orbitTrapFalloff: 9.5,
         orbitTrapHueScale: 2.75,
         useOrbitTrap: 0,
-        focalDistance: 12
+        focalDistance: 12,
+        slicePlaneEnabled: 1,
+        slicePlaneDistance: 4.25,
+        slicePlaneLock: 1,
+        slicePlaneKeepFarSide: 0
       },
       "de-pathtracer-physical",
       pathDefaults
@@ -144,5 +168,9 @@ describe("integrators", () => {
     expect(transferred.orbitTrapHueScale).toBe(2.75);
     expect(transferred.useOrbitTrap).toBe(0);
     expect(transferred.focalDistance).toBe(12);
+    expect(transferred.slicePlaneEnabled).toBe(1);
+    expect(transferred.slicePlaneDistance).toBe(4.25);
+    expect(transferred.slicePlaneLock).toBe(1);
+    expect(transferred.slicePlaneKeepFarSide).toBe(0);
   });
 });

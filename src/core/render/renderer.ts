@@ -114,6 +114,13 @@ interface TileRect {
   height: number;
 }
 
+type Vec3Tuple = [number, number, number];
+
+export interface SlicePlaneLockFrame {
+  origin: Vec3Tuple;
+  normal: Vec3Tuple;
+}
+
 export class FragmentRenderer {
   private readonly canvas: HTMLCanvasElement;
 
@@ -179,6 +186,14 @@ export class FragmentRenderer {
   private cameraRayResolutionOverride: [number, number] | null = null;
 
   private cameraRayPixelOffsetOverride: [number, number] = [0, 0];
+
+  private slicePlaneLockWasEnabled = false;
+
+  private slicePlaneLockAnchorOrigin: Vec3Tuple | null = null;
+
+  private slicePlaneLockAnchorNormal: Vec3Tuple | null = null;
+
+  private slicePlaneLockFrameExternal: SlicePlaneLockFrame | null = null;
 
   constructor(canvas: HTMLCanvasElement, options: RendererOptions) {
     this.canvas = canvas;
@@ -324,6 +339,21 @@ export class FragmentRenderer {
     }
   }
 
+  updateSlicePlaneLockFrame(frame: SlicePlaneLockFrame | null): void {
+    this.slicePlaneLockFrameExternal =
+      frame === null
+        ? null
+        : {
+            origin: [...frame.origin],
+            normal: [...frame.normal]
+          };
+    if (this.renderSettings.tileCount > 1) {
+      this.notifyInteractionWithoutReset();
+    } else {
+      this.markDirty();
+    }
+  }
+
   setCamera(camera: CameraState): void {
     this.camera = {
       eye: [...camera.eye],
@@ -455,6 +485,17 @@ export class FragmentRenderer {
     this.setIntUniform(this.focusProbeProgram, "uMaxRaySteps", Math.trunc(this.getIntegratorOptionValue("maxRaySteps", 192)));
     this.setFloatUniform(this.focusProbeProgram, "uMaxDistance", this.getIntegratorOptionValue("maxDistance", 1200));
     this.setFloatUniform(this.focusProbeProgram, "uFudgeFactor", this.getIntegratorOptionValue("fudgeFactor", 1));
+    this.setIntUniform(
+      this.focusProbeProgram,
+      "uIntegrator_slicePlaneEnabled",
+      Math.trunc(this.getIntegratorOptionValue("slicePlaneEnabled", 0))
+    );
+    this.setIntUniform(
+      this.focusProbeProgram,
+      "uIntegrator_slicePlaneKeepFarSide",
+      Math.trunc(this.getIntegratorOptionValue("slicePlaneKeepFarSide", 1))
+    );
+    this.uploadResolvedSlicePlaneUniforms(this.focusProbeProgram);
 
     this.uploadSceneUniformValues(this.focusProbeProgram);
 
@@ -740,6 +781,7 @@ export class FragmentRenderer {
       this.getIntegratorOptionValue("focalDistance", this.getTargetDistance())
     );
     this.setFloatUniform(this.sceneProgram, "uAAStrength", this.getIntegratorOptionValue("aaJitter", 1));
+    this.uploadResolvedSlicePlaneUniforms(this.sceneProgram);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.readTarget.texture);
@@ -787,6 +829,7 @@ export class FragmentRenderer {
       this.getIntegratorOptionValue("focalDistance", this.getTargetDistance())
     );
     this.setFloatUniform(this.sceneProgram, "uAAStrength", this.getIntegratorOptionValue("aaJitter", 1));
+    this.uploadResolvedSlicePlaneUniforms(this.sceneProgram);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.writeTarget.texture);
@@ -905,6 +948,70 @@ export class FragmentRenderer {
         this.setFloatUniform(program, uniformName, value);
       }
     }
+  }
+
+  private getCameraForwardDirection(): Vec3Tuple {
+    const dx = this.camera.target[0] - this.camera.eye[0];
+    const dy = this.camera.target[1] - this.camera.eye[1];
+    const dz = this.camera.target[2] - this.camera.eye[2];
+    const len = Math.hypot(dx, dy, dz);
+    if (!Number.isFinite(len) || len <= 1.0e-6) {
+      return [0, 0, 1];
+    }
+    return [dx / len, dy / len, dz / len];
+  }
+
+  private syncSlicePlaneLockState(): void {
+    const lockEnabled = this.getIntegratorOptionValue("slicePlaneLock", 0) >= 0.5;
+
+    if (lockEnabled) {
+      if (!this.slicePlaneLockWasEnabled || this.slicePlaneLockAnchorOrigin === null || this.slicePlaneLockAnchorNormal === null) {
+        this.slicePlaneLockAnchorOrigin = [...this.camera.eye];
+        this.slicePlaneLockAnchorNormal = this.getCameraForwardDirection();
+        console.info("[renderer] Captured locked slice plane frame.");
+      }
+    } else if (this.slicePlaneLockWasEnabled) {
+      console.info("[renderer] Released locked slice plane frame.");
+    }
+
+    this.slicePlaneLockWasEnabled = lockEnabled;
+  }
+
+  private resolveSlicePlanePointAndNormal(): { point: Vec3Tuple; normal: Vec3Tuple } {
+    const lockEnabled = this.getIntegratorOptionValue("slicePlaneLock", 0) >= 0.5;
+    const distance = this.getIntegratorOptionValue("slicePlaneDistance", 2);
+
+    if (lockEnabled && this.slicePlaneLockFrameExternal !== null) {
+      const origin = this.slicePlaneLockFrameExternal.origin;
+      const normal = this.slicePlaneLockFrameExternal.normal;
+      const point: Vec3Tuple = [
+        origin[0] + normal[0] * distance,
+        origin[1] + normal[1] * distance,
+        origin[2] + normal[2] * distance
+      ];
+      return { point, normal: [...normal] };
+    }
+
+    this.syncSlicePlaneLockState();
+
+    const origin: Vec3Tuple =
+      lockEnabled && this.slicePlaneLockAnchorOrigin !== null ? this.slicePlaneLockAnchorOrigin : [...this.camera.eye];
+    const normal: Vec3Tuple =
+      lockEnabled && this.slicePlaneLockAnchorNormal !== null ? this.slicePlaneLockAnchorNormal : this.getCameraForwardDirection();
+
+    const point: Vec3Tuple = [
+      origin[0] + normal[0] * distance,
+      origin[1] + normal[1] * distance,
+      origin[2] + normal[2] * distance
+    ];
+
+    return { point, normal };
+  }
+
+  private uploadResolvedSlicePlaneUniforms(program: WebGLProgram): void {
+    const resolved = this.resolveSlicePlanePointAndNormal();
+    this.setVec3Uniform(program, "uSlicePlaneResolvedPoint", resolved.point);
+    this.setVec3Uniform(program, "uSlicePlaneResolvedNormal", resolved.normal);
   }
 
   private uploadUniformToProgram(

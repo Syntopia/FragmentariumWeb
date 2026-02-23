@@ -208,14 +208,33 @@ float fragmentariumWebCameraFocalDistance() {
 }
 
 function buildFragmentariumBridge(options: { hasOrbitTrap: boolean }): string {
+  const clipHelpers = `
+float fragmentariumWebSlicePlaneSignedDistance(vec3 p) {
+  vec3 nRaw = uSlicePlaneResolvedNormal;
+  float nLen = length(nRaw);
+  vec3 n = nLen > 1.0e-6 ? (nRaw / nLen) : vec3(0.0, 0.0, 1.0);
+  return dot(p - uSlicePlaneResolvedPoint, n);
+}
+
+float fragmentariumWebApplySlicePlaneCSG(vec3 p, float deValue) {
+  if (uIntegrator_slicePlaneEnabled <= 0) {
+    return deValue;
+  }
+  float sd = fragmentariumWebSlicePlaneSignedDistance(p);
+  float keepHalfSpaceSdf = uIntegrator_slicePlaneKeepFarSide > 0 ? -sd : sd;
+  return max(deValue, keepHalfSpaceSdf);
+}
+`;
+
   if (!options.hasOrbitTrap) {
     return `
+${clipHelpers}
 float fragmentariumWebDETrace(vec3 p) {
-  return DE(p);
+  return fragmentariumWebApplySlicePlaneCSG(p, DE(p));
 }
 
 float fragmentariumWebDESample(vec3 p) {
-  return DE(p);
+  return fragmentariumWebApplySlicePlaneCSG(p, DE(p));
 }
 
 float fragmentariumWebOrbitTrapValue(float falloff) {
@@ -229,6 +248,7 @@ vec3 fragmentariumResolveBaseColor(vec3 p, vec3 n) {
   }
 
   return `
+${clipHelpers}
 vec4 fragmentariumWebCapturedOrbitTrap = vec4(10000.0);
 
 void fragmentariumWebResetOrbitTrap() {
@@ -239,7 +259,7 @@ float fragmentariumWebDETrace(vec3 p) {
   fragmentariumWebResetOrbitTrap();
   float d = DE(p);
   fragmentariumWebCapturedOrbitTrap = orbitTrap;
-  return d;
+  return fragmentariumWebApplySlicePlaneCSG(p, d);
 }
 
 float fragmentariumWebDESample(vec3 p) {
@@ -248,7 +268,7 @@ float fragmentariumWebDESample(vec3 p) {
   float d = DE(p);
   orbitTrap = savedTrap;
   fragmentariumWebCapturedOrbitTrap = savedTrap;
-  return d;
+  return fragmentariumWebApplySlicePlaneCSG(p, d);
 }
 
 float fragmentariumWebOrbitTrapValue(float falloff) {
@@ -312,6 +332,10 @@ uniform float uFov;
 uniform float uLensAperture;
 uniform float uLensFocalDistance;
 uniform float uAAStrength;
+uniform int uIntegrator_slicePlaneEnabled;
+uniform int uIntegrator_slicePlaneKeepFarSide;
+uniform vec3 uSlicePlaneResolvedPoint;
+uniform vec3 uSlicePlaneResolvedNormal;
 
 float DE(vec3 p);
 vec3 baseColor(vec3 p, vec3 n);
@@ -452,6 +476,10 @@ uniform float uDetailExp;
 uniform int uMaxRaySteps;
 uniform float uMaxDistance;
 uniform float uFudgeFactor;
+uniform int uIntegrator_slicePlaneEnabled;
+uniform int uIntegrator_slicePlaneKeepFarSide;
+uniform vec3 uSlicePlaneResolvedPoint;
+uniform vec3 uSlicePlaneResolvedNormal;
 
 float DE(vec3 p);
 vec3 baseColor(vec3 p, vec3 n);

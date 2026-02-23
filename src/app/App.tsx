@@ -36,6 +36,7 @@ import {
   DEFAULT_RENDER_SETTINGS,
   FragmentRenderer,
   type RenderSettings,
+  type SlicePlaneLockFrame,
   type RendererShaderErrorDetails,
   type RendererStatus
 } from "../core/render/renderer";
@@ -91,6 +92,8 @@ const MIN_LEFT_SECTION_HEIGHT = 140;
 const EXPORT_STILL_TILE_THRESHOLD_PIXELS = 2048 * 2048;
 const EXPORT_STILL_TILE_SIZE = 1024;
 const DEFAULT_STARTUP_INTEGRATOR_ID = "de-pathtracer-physical";
+const ERROR_STRIP_PREVIEW_MAX_LINES = 12;
+const ERROR_STRIP_PREVIEW_MAX_CHARS = 2400;
 const LEGACY_INTEGRATOR_ID_MAP: Record<string, string> = {
   "de-pathtracer": "de-pathtracer-physical"
 };
@@ -133,6 +136,7 @@ interface InitialState {
   integratorOptionsById: Record<string, IntegratorOptionValues>;
   uniformValuesBySystem: Record<string, Record<string, UniformValue>>;
   cameraBySystem: Record<string, CameraState>;
+  slicePlaneLockFrameBySystem: Record<string, SlicePlaneLockFrame | null>;
   renderSettings: RenderSettings;
   persistenceError: string | null;
 }
@@ -201,6 +205,11 @@ interface ResolvedPresetExportState {
   camera: CameraState;
 }
 
+interface ErrorStripPreview {
+  text: string;
+  truncated: boolean;
+}
+
 const PRESET_KEY_PREFIX = "preset:";
 const LOCAL_KEY_PREFIX = "local:";
 
@@ -222,6 +231,48 @@ function cloneCameraState(camera: CameraState): CameraState {
     up: [...camera.up],
     fov: camera.fov
   };
+}
+
+function cloneSlicePlaneLockFrame(frame: SlicePlaneLockFrame): SlicePlaneLockFrame {
+  return {
+    origin: [...frame.origin],
+    normal: [...frame.normal]
+  };
+}
+
+function cameraForwardDirection(camera: CameraState): [number, number, number] {
+  const dx = camera.target[0] - camera.eye[0];
+  const dy = camera.target[1] - camera.eye[1];
+  const dz = camera.target[2] - camera.eye[2];
+  const len = Math.hypot(dx, dy, dz);
+  if (!Number.isFinite(len) || len <= 1.0e-6) {
+    return [0, 0, 1];
+  }
+  return [dx / len, dy / len, dz / len];
+}
+
+function buildErrorStripPreview(message: string): ErrorStripPreview {
+  const normalized = message.replace(/\r\n?/g, "\n");
+  const lines = normalized.split("\n");
+
+  let preview = normalized;
+  let truncated = false;
+
+  if (lines.length > ERROR_STRIP_PREVIEW_MAX_LINES) {
+    preview = lines.slice(0, ERROR_STRIP_PREVIEW_MAX_LINES).join("\n");
+    truncated = true;
+  }
+
+  if (preview.length > ERROR_STRIP_PREVIEW_MAX_CHARS) {
+    preview = `${preview.slice(0, ERROR_STRIP_PREVIEW_MAX_CHARS).trimEnd()}\n`;
+    truncated = true;
+  }
+
+  if (truncated) {
+    preview += "… (truncated in view; use Copy Error for full output)";
+  }
+
+  return { text: preview, truncated };
 }
 
 function resolvePresetExportState(
@@ -470,6 +521,7 @@ function buildInitialState(): InitialState {
     }, {}),
     uniformValuesBySystem: {},
     cameraBySystem: {},
+    slicePlaneLockFrameBySystem: {},
     renderSettings: { ...DEFAULT_RENDER_SETTINGS },
     persistenceError: null
   };
@@ -483,6 +535,7 @@ function buildInitialState(): InitialState {
     const nextSourcesByPath: Record<string, string> = {};
     const nextPayloadsByPath: Record<string, SettingsClipboardPayload> = {};
     const nextEditorSourceBySystem = { ...defaults.editorSourceBySystem };
+    const nextSlicePlaneLockFrameBySystem: Record<string, SlicePlaneLockFrame | null> = {};
     const invalidPaths: string[] = [];
 
     for (const [path, rawJson] of Object.entries(storedSessions)) {
@@ -495,7 +548,12 @@ function buildInitialState(): InitialState {
         }
         nextPayloadsByPath[path] = payload;
         nextSourcesByPath[path] = source;
-        nextEditorSourceBySystem[makeLocalEntryKey(path)] = source;
+        const entryKey = makeLocalEntryKey(path);
+        nextEditorSourceBySystem[entryKey] = source;
+        if (payload.slicePlaneLockFrame !== undefined) {
+          nextSlicePlaneLockFrameBySystem[entryKey] =
+            payload.slicePlaneLockFrame === null ? null : cloneSlicePlaneLockFrame(payload.slicePlaneLockFrame);
+        }
       } catch {
         invalidPaths.push(path);
       }
@@ -506,6 +564,7 @@ function buildInitialState(): InitialState {
       localSystemsByPath: nextSourcesByPath,
       localSessionPayloadsByPath: nextPayloadsByPath,
       editorSourceBySystem: nextEditorSourceBySystem,
+      slicePlaneLockFrameBySystem: nextSlicePlaneLockFrameBySystem,
       persistenceError:
         invalidPaths.length > 0
           ? `Skipped ${invalidPaths.length} invalid saved session${invalidPaths.length === 1 ? "" : "s"}.`
@@ -888,6 +947,9 @@ export function App(): JSX.Element {
   const [editorSourceBySystem, setEditorSourceBySystem] = useState(initial.editorSourceBySystem);
   const [uniformValuesBySystem, setUniformValuesBySystem] = useState(initial.uniformValuesBySystem);
   const [cameraBySystem, setCameraBySystem] = useState(initial.cameraBySystem);
+  const [slicePlaneLockFrameBySystem, setSlicePlaneLockFrameBySystem] = useState(
+    initial.slicePlaneLockFrameBySystem
+  );
   const [integratorOptionsById, setIntegratorOptionsById] = useState(initial.integratorOptionsById);
   const [renderSettings, setRenderSettings] = useState(initial.renderSettings);
   const [activeRightPaneTab, setActiveRightPaneTab] = useState<RightPaneTabId>("integrator");
@@ -926,6 +988,15 @@ export function App(): JSX.Element {
   const [compileError, setCompileError] = useState<string | null>(initial.persistenceError);
   const [editorJumpRequest, setEditorJumpRequest] = useState<EditorJumpRequest | null>(null);
   const nextEditorJumpTokenRef = useRef(1);
+
+  const compileErrorPreview = useMemo(
+    () => (compileError !== null ? buildErrorStripPreview(compileError) : null),
+    [compileError]
+  );
+  const shaderErrorPreview = useMemo(
+    () => (shaderError !== null ? buildErrorStripPreview(shaderError) : null),
+    [shaderError]
+  );
 
   const selectedPresetId = parsePresetIdFromKey(selectedSystemKey);
   const selectedLocalPath = parseLocalPathFromKey(selectedSystemKey);
@@ -1001,6 +1072,7 @@ export function App(): JSX.Element {
   );
 
   const cameraState = cameraBySystem[selectedSystemKey] ?? defaultCamera;
+  const slicePlaneLockFrame = slicePlaneLockFrameBySystem[selectedSystemKey] ?? null;
   const hasSourceChanges = sourceDraft !== baselineSource;
   const isEditingLocalSystem = selectedLocalPath !== null;
   const saveButtonLabel = isEditingLocalSystem ? "Update Session" : "Save Session";
@@ -1037,6 +1109,7 @@ export function App(): JSX.Element {
           renderSettings,
           uniformValues,
           camera: cameraState,
+          slicePlaneLockFrame,
           systemDefinition: {
             source: sourceDraft,
             treePath: selectedSystemTreePath,
@@ -1050,6 +1123,7 @@ export function App(): JSX.Element {
       activeIntegratorOptions,
       activePresetBySystem,
       cameraState,
+      slicePlaneLockFrame,
       renderSettings,
       selectedSystemKey,
       selectedSystemSourcePath,
@@ -1291,6 +1365,38 @@ export function App(): JSX.Element {
       setSelectedSystemKey(makePresetEntryKey(defaultId));
     }
   }, [localSystemsByPath, selectedSystemKey]);
+
+  useEffect(() => {
+    const lockEnabled = (activeIntegratorOptions.slicePlaneLock ?? 0) >= 0.5;
+    if (lockEnabled) {
+      setSlicePlaneLockFrameBySystem((prev) => {
+        if (prev[selectedSystemKey] !== undefined && prev[selectedSystemKey] !== null) {
+          return prev;
+        }
+        const captured: SlicePlaneLockFrame = {
+          origin: [...cameraState.eye],
+          normal: cameraForwardDirection(cameraState)
+        };
+        console.info(`[app] Captured locked slice plane frame for '${selectedSystemKey}'.`);
+        return {
+          ...prev,
+          [selectedSystemKey]: captured
+        };
+      });
+      return;
+    }
+
+    setSlicePlaneLockFrameBySystem((prev) => {
+      if (prev[selectedSystemKey] === undefined || prev[selectedSystemKey] === null) {
+        return prev;
+      }
+      console.info(`[app] Cleared locked slice plane frame for '${selectedSystemKey}'.`);
+      return {
+        ...prev,
+        [selectedSystemKey]: null
+      };
+    });
+  }, [activeIntegratorOptions.slicePlaneLock, cameraState, selectedSystemKey]);
 
   useEffect(() => {
     const serialized = Object.fromEntries(
@@ -2236,6 +2342,7 @@ export function App(): JSX.Element {
         renderSettings,
         uniformValues,
         camera: cameraState,
+        slicePlaneLockFrame,
         systemDefinition: {
           source: sourceDraft,
           treePath: selectedSystemTreePath,
@@ -2306,6 +2413,13 @@ export function App(): JSX.Element {
 
       const nextRenderSettings = coerceRenderSettings(payload.renderSettings);
       setRenderSettings(nextRenderSettings);
+      setSlicePlaneLockFrameBySystem((prev) => ({
+        ...prev,
+        [selectedSystemKey]:
+          payload.slicePlaneLockFrame === undefined || payload.slicePlaneLockFrame === null
+            ? null
+            : cloneSlicePlaneLockFrame(payload.slicePlaneLockFrame)
+      }));
 
       if (targetParseResult !== null) {
         const nextUniformValues = coerceUniformValues(targetParseResult.uniforms, payload.uniformValues);
@@ -2423,6 +2537,13 @@ export function App(): JSX.Element {
             [nextIntegratorId]: nextIntegratorOptions
           }));
           setRenderSettings(coerceRenderSettings(payload.renderSettings));
+          setSlicePlaneLockFrameBySystem((prev) => ({
+            ...prev,
+            [entryKey]:
+              payload.slicePlaneLockFrame === undefined || payload.slicePlaneLockFrame === null
+                ? null
+                : cloneSlicePlaneLockFrame(payload.slicePlaneLockFrame)
+          }));
           setCompileError(null);
           setSelectedSystemKey(entryKey);
           return;
@@ -2482,6 +2603,7 @@ export function App(): JSX.Element {
       renderSettings,
       uniformValues,
       camera: cameraState,
+      slicePlaneLockFrame,
       systemDefinition: {
         source: sourceDraft,
         treePath: selectedSystemTreePath,
@@ -2537,6 +2659,10 @@ export function App(): JSX.Element {
         [targetEntryKey]: current
       };
     });
+    setSlicePlaneLockFrameBySystem((prev) => ({
+      ...prev,
+      [targetEntryKey]: slicePlaneLockFrame === null ? null : cloneSlicePlaneLockFrame(slicePlaneLockFrame)
+    }));
     setSelectedSystemKey(targetEntryKey);
     pushToast(`Session saved: ${normalizedPath}`);
   };
@@ -2579,6 +2705,11 @@ export function App(): JSX.Element {
       delete next[entryKey];
       return next;
     });
+    setSlicePlaneLockFrameBySystem((prev) => {
+      const next = { ...prev };
+      delete next[entryKey];
+      return next;
+    });
 
     if (selectedSystemKey === entryKey) {
       const defaultId = FRACTAL_SYSTEMS.find((system) => system.id === "mandelbulb")?.id ?? FRACTAL_SYSTEMS[0].id;
@@ -2611,6 +2742,7 @@ export function App(): JSX.Element {
         renderSettings,
         uniformValues,
         camera: cameraState,
+        slicePlaneLockFrame,
         systemDefinition: {
           source: sourceDraft,
           treePath: selectedSystemTreePath,
@@ -2776,6 +2908,7 @@ export function App(): JSX.Element {
         integratorOptions={activeIntegratorOptions}
         renderSettings={renderSettings}
         cameraState={cameraState}
+        slicePlaneLockFrame={slicePlaneLockFrame}
         onCameraChange={onCameraChange}
         onFocusDistance={onFocusDistance}
         onStatus={setStatus}
@@ -3394,8 +3527,22 @@ export function App(): JSX.Element {
       {(compileError !== null || shaderError !== null) && (
         <div className="error-strip">
           <div className="error-strip-messages">
-            {compileError !== null ? <span>Compile error: {compileError}</span> : null}
-            {shaderError !== null ? <span>Shader error: {shaderError}</span> : null}
+            {compileError !== null && compileErrorPreview !== null ? (
+              <div className="error-strip-message">
+                <span className="error-strip-message-label">
+                  Compile error{compileErrorPreview.truncated ? " (preview)" : ""}:
+                </span>
+                <pre className="error-strip-message-preview">{compileErrorPreview.text}</pre>
+              </div>
+            ) : null}
+            {shaderError !== null && shaderErrorPreview !== null ? (
+              <div className="error-strip-message">
+                <span className="error-strip-message-label">
+                  Shader error{shaderErrorPreview.truncated ? " (preview)" : ""}:
+                </span>
+                <pre className="error-strip-message-preview">{shaderErrorPreview.text}</pre>
+              </div>
+            ) : null}
             {mappedShaderDiagnostics.length > 0 ? (
               <div className="error-strip-diagnostics">
                 {mappedShaderDiagnostics.slice(0, 8).map((entry, index) => (

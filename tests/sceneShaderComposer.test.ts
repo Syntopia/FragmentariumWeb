@@ -120,10 +120,16 @@ float DE(vec3 p) {
     expect(sources.fragmentSource).toContain("uniform float uLensFocalDistance;");
     expect(sources.fragmentSource).toContain("uniform float uAAStrength;");
     expect(sources.fragmentSource).toContain("uniform int uFrameIndex;");
+    expect(sources.fragmentSource).toContain("uniform int uIntegrator_slicePlaneEnabled;");
+    expect(sources.fragmentSource).toContain("uniform int uIntegrator_slicePlaneKeepFarSide;");
+    expect(sources.fragmentSource).toContain("uniform vec3 uSlicePlaneResolvedPoint;");
+    expect(sources.fragmentSource).toContain("uniform vec3 uSlicePlaneResolvedNormal;");
     expect(sources.fragmentSource).toContain("float fragmentariumWebCameraAperture()");
     expect(sources.fragmentSource).toContain("return max(Aperture, 0.0);");
     expect(sources.fragmentSource).toContain("float fragmentariumWebCameraFocalDistance()");
     expect(sources.fragmentSource).toContain("return max(FocalPlane, 1.0e-4);");
+    expect(sources.fragmentSource).toContain("float fragmentariumWebApplySlicePlaneCSG(vec3 p, float deValue)");
+    expect(sources.fragmentSource).toContain("return fragmentariumWebApplySlicePlaneCSG(p, DE(p));");
     expect(sources.fragmentSource).toContain("cameraRay(gl_FragCoord.xy, rayOrigin, rayDir);");
     expect(sources.fragmentSource).toContain("renderColor(rayOrigin, rayDir)");
   });
@@ -172,6 +178,10 @@ float DE(vec3 p) {
     expect(sources.fragmentSource).toContain("uniform float uFov;");
     expect(sources.fragmentSource).toContain("uniform float uDetailExp;");
     expect(sources.fragmentSource).toContain("uniform int uMaxRaySteps;");
+    expect(sources.fragmentSource).toContain("uniform int uIntegrator_slicePlaneEnabled;");
+    expect(sources.fragmentSource).toContain("uniform int uIntegrator_slicePlaneKeepFarSide;");
+    expect(sources.fragmentSource).toContain("uniform vec3 uSlicePlaneResolvedPoint;");
+    expect(sources.fragmentSource).toContain("uniform vec3 uSlicePlaneResolvedNormal;");
     expect(sources.fragmentSource).toContain("vec2 uv = focusUv * 2.0 - 1.0;");
     expect(sources.fragmentSource).toContain("vec2 cameraCoord = uv * uFov;");
     expect(sources.fragmentSource).toContain("fragColor = vec4(hitDistance, 0.0, 0.0, 1.0);");
