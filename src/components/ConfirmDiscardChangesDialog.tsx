@@ -25,14 +25,7 @@ export function ConfirmDiscardChangesDialog(
   }
 
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          props.onCancel();
-        }
-      }}
-    >
+    <div className="modal-backdrop">
       <div className="modal-window" role="dialog" aria-modal="true" aria-labelledby="discard-switch-dialog-title">
         <h3 id="discard-switch-dialog-title">Discard Unsaved Changes</h3>
         <p className="muted">

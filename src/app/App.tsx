@@ -8,7 +8,9 @@ import { SaveLocalSystemDialog } from "../components/SaveLocalSystemDialog";
 import { ExportRenderDialog, type ExportRenderDialogProgress } from "../components/ExportRenderDialog";
 import { HelpDialog } from "../components/HelpDialog";
 import {
+  LOCAL_SESSION_GALLERY_ROOT_LABEL,
   SessionGalleryDialog,
+  type SessionGalleryExternalSource,
   type SessionGalleryItem,
   type SessionGalleryStorageInfo
 } from "../components/SessionGalleryDialog";
@@ -49,6 +51,13 @@ import {
 } from "../core/render/renderer";
 import { FRACTAL_SYSTEMS, SYSTEM_INCLUDE_MAP, type FractalSystemDefinition } from "../systems/registry";
 import { embedSessionJsonInPng, extractSessionJsonFromPng } from "../utils/pngMetadata";
+import {
+  listGitHubGalleryPngEntries,
+  parseGitHubGalleryTreeUrl,
+  type GitHubGalleryPngEntry,
+  type GitHubGalleryTreeSource
+} from "../utils/githubGallerySources";
+import { loadGitHubGallerySourceUrls, saveGitHubGallerySourceUrls } from "../utils/githubGallerySourceStore";
 import { makeUniqueSessionPath } from "../utils/sessionPathNaming";
 import {
   deleteSessionSnapshotRecord,
@@ -113,6 +122,9 @@ const LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES = 15;
 const SESSION_PNG_PREVIEW_WIDTH = 500;
 const SESSION_PNG_PREVIEW_SUBFRAMES = 30;
 const SESSION_GALLERY_ZIP_ROOT = "sessions";
+const DEFAULT_GITHUB_SESSION_GALLERY_SOURCE_URL =
+  "https://github.com/Syntopia/FragmentariumWeb/tree/main/factory%20sessions/sessions";
+const SESSION_GALLERY_GITHUB_ROOT_LABEL = "GitHub";
 const APP_VERSION_LABEL = `v${buildVersion.version}`;
 const APP_BUILD_DATE_LABEL = buildVersion.buildDate;
 const APP_TITLE = `Fragmentarium Web ${APP_VERSION_LABEL} (${APP_BUILD_DATE_LABEL})`;
@@ -190,7 +202,20 @@ interface PendingSessionPngImportState {
 
 interface LocalSessionSnapshotState {
   pngBlob: Blob;
+  createdAtMs: number;
   updatedAtMs: number;
+}
+
+interface GitHubGallerySourceState {
+  source: GitHubGalleryTreeSource;
+  status: "idle" | "loading" | "ready" | "error";
+  items: GitHubGalleryPngEntry[];
+  errorMessage: string | null;
+}
+
+interface InitialGitHubGallerySourceLoadResult {
+  sources: GitHubGallerySourceState[];
+  errorMessage: string | null;
 }
 
 interface ToastNotification {
@@ -260,6 +285,7 @@ interface DecodedLocalSessionSnapshot {
   payload: SettingsClipboardPayload;
   source: string;
   snapshotPngBlob: Blob;
+  createdAtMs: number;
   updatedAtMs: number;
 }
 
@@ -468,6 +494,30 @@ function requireEmbeddedSystemSource(payload: SettingsClipboardPayload, sourceLa
     throw new Error(`${sourceLabel} is missing embedded system source.`);
   }
   return source;
+}
+
+function loadInitialGitHubGallerySources(): InitialGitHubGallerySourceLoadResult {
+  try {
+    const storedUrls = loadGitHubGallerySourceUrls();
+    const urls = storedUrls.length > 0 ? storedUrls : [DEFAULT_GITHUB_SESSION_GALLERY_SOURCE_URL];
+    const sources: GitHubGallerySourceState[] = urls.map((url) => ({
+      source: parseGitHubGalleryTreeUrl(url),
+      status: "idle",
+      items: [],
+      errorMessage: null
+    }));
+    return { sources, errorMessage: null };
+  } catch (error) {
+    return {
+      sources: [],
+      errorMessage: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+function makeGitHubGallerySourceTreePath(source: GitHubGalleryTreeSource): string {
+  const folderLabel = `GH ${source.sourceLabel.replaceAll("/", " > ")}`;
+  return `${SESSION_GALLERY_GITHUB_ROOT_LABEL}/${folderLabel}`;
 }
 
 async function yieldToUiFrames(frameCount = 1): Promise<void> {
@@ -855,7 +905,7 @@ function getBaselineSourceForEntry(
   return "";
 }
 
-function buildSystemsTreeNodes(localSystemsByPath: Record<string, string>): SystemsTreeNode[] {
+function buildSystemsTreeNodes(_localSystemsByPath: Record<string, string>): SystemsTreeNode[] {
   const presetRoot: SystemsTreeFolderNode = {
     type: "folder",
     id: "preset-root-internal",
@@ -935,58 +985,6 @@ function buildSystemsTreeNodes(localSystemsByPath: Record<string, string>): Syst
     });
   }
 
-  const localRoot: SystemsTreeFolderNode = {
-    type: "folder",
-    id: "local-root",
-    name: "Sessions",
-    children: []
-  };
-
-  const ensureLocalFolder = (
-    parent: SystemsTreeFolderNode,
-    folderName: string,
-    fullPath: string
-  ): SystemsTreeFolderNode => {
-    const existing = parent.children.find(
-      (child) => child.type === "folder" && child.id === `local-folder:${fullPath}`
-    );
-    if (existing !== undefined && existing.type === "folder") {
-      return existing;
-    }
-
-    const next: SystemsTreeFolderNode = {
-      type: "folder",
-      id: `local-folder:${fullPath}`,
-      name: folderName,
-      children: []
-    };
-    parent.children.push(next);
-    return next;
-  };
-
-  for (const localPath of Object.keys(localSystemsByPath).sort((a, b) => a.localeCompare(b))) {
-    const segments = localPath.split("/").filter((entry) => entry.length > 0);
-    if (segments.length === 0) {
-      continue;
-    }
-
-    let folder = localRoot;
-    for (let i = 0; i < segments.length - 1; i += 1) {
-      const name = segments[i];
-      const fullPath = segments.slice(0, i + 1).join("/");
-      folder = ensureLocalFolder(folder, name, fullPath);
-    }
-
-    const leafName = segments[segments.length - 1];
-    folder.children.push({
-      type: "leaf",
-      id: `local-leaf:${localPath}`,
-      name: leafName,
-      entryKey: makeLocalEntryKey(localPath),
-      localPath
-    });
-  }
-
   const sortNodeChildren = (node: SystemsTreeFolderNode): void => {
     node.children.sort((a, b) => {
       if (a.type !== b.type) {
@@ -1008,16 +1006,13 @@ function buildSystemsTreeNodes(localSystemsByPath: Record<string, string>): Syst
     const [mandelbulbLeaf] = presetRoot.children.splice(mandelbulbLeafIndex, 1);
     presetRoot.children.unshift(mandelbulbLeaf);
   }
-  sortNodeChildren(localRoot);
 
-  return [
-    ...presetRoot.children,
-    localRoot
-  ];
+  return [...presetRoot.children];
 }
 
 export function App(): JSX.Element {
   const initial = useMemo(buildInitialState, []);
+  const initialGitHubGallerySources = useMemo(loadInitialGitHubGallerySources, []);
 
   const [leftPanePx, setLeftPanePx] = useState(initial.leftPanePx);
   const [rightPanePx, setRightPanePx] = useState(initial.rightPanePx);
@@ -1049,11 +1044,18 @@ export function App(): JSX.Element {
   const [settingsCopyActionsOpen, setSettingsCopyActionsOpen] = useState(false);
   const [sessionPngExportInProgress, setSessionPngExportInProgress] = useState(false);
   const [sessionGalleryOpen, setSessionGalleryOpen] = useState(false);
+  const [githubGallerySources, setGitHubGallerySources] = useState<GitHubGallerySourceState[]>(
+    initialGitHubGallerySources.sources
+  );
+  const githubGallerySourcesRef = useRef<GitHubGallerySourceState[]>(initialGitHubGallerySources.sources);
   const [galleryOriginStorageStats, setGalleryOriginStorageStats] = useState<GalleryOriginStorageStatsState>({
     originUsageBytes: null,
     originQuotaBytes: null,
     persistentStorageStatus: "unknown"
   });
+  const [githubGallerySourceLoadError, setGitHubGallerySourceLoadError] = useState<string | null>(
+    initialGitHubGallerySources.errorMessage
+  );
   const [persistentStorageRequestInProgress, setPersistentStorageRequestInProgress] = useState(false);
   const [blockingTask, setBlockingTask] = useState<BlockingTaskState | null>(null);
   const [exportDialogState, setExportDialogState] = useState<ExportDialogState | null>(null);
@@ -1083,6 +1085,10 @@ export function App(): JSX.Element {
   });
   const [shaderError, setShaderError] = useState<string | null>(null);
   const [shaderErrorDetails, setShaderErrorDetails] = useState<RendererShaderErrorDetails | null>(null);
+
+  useEffect(() => {
+    githubGallerySourcesRef.current = githubGallerySources;
+  }, [githubGallerySources]);
 
   useEffect(() => {
     document.title = APP_TITLE;
@@ -1197,20 +1203,62 @@ export function App(): JSX.Element {
   const localSessionGalleryItems = useMemo<SessionGalleryItem[]>(
     () =>
       Object.entries(localSessionSnapshotsByPath)
-        .map(([path, snapshot]) => {
+        .map<SessionGalleryItem | null>(([path, snapshot]) => {
           const previewUrl = localSessionPreviewUrlsByPath[path];
           if (previewUrl === undefined) {
             return null;
           }
           return {
-            path,
+            id: `local:${path}`,
+            path: `${LOCAL_SESSION_GALLERY_ROOT_LABEL}/${path}`,
+            tileLabel: path,
             previewUrl,
-            updatedAtMs: snapshot.updatedAtMs
+            createdAtMs: snapshot.createdAtMs,
+            updatedAtMs: snapshot.updatedAtMs,
+            sourceKind: "local",
+            localPath: path
           } satisfies SessionGalleryItem;
         })
         .filter((entry): entry is SessionGalleryItem => entry !== null)
         .sort((a, b) => a.path.localeCompare(b.path)),
     [localSessionPreviewUrlsByPath, localSessionSnapshotsByPath]
+  );
+  const externalSessionGalleryItems = useMemo<SessionGalleryItem[]>(
+    () =>
+      githubGallerySources
+        .flatMap((sourceState) => {
+          const sourceTreePath = makeGitHubGallerySourceTreePath(sourceState.source);
+          return sourceState.items.map((item) => ({
+            id: `${sourceState.source.id}:${item.repoPath}`,
+            path: `${sourceTreePath}/${item.relativePath}`,
+            tileLabel: item.relativePath,
+            previewUrl: item.downloadUrl,
+            createdAtMs: null,
+            updatedAtMs: 0,
+            sourceKind: "github" as const,
+            remotePngUrl: item.downloadUrl
+          }));
+        }
+        )
+        .sort((a, b) => a.path.localeCompare(b.path)),
+    [githubGallerySources]
+  );
+  const sessionGalleryItems = useMemo<SessionGalleryItem[]>(
+    () => [...localSessionGalleryItems, ...externalSessionGalleryItems].sort((a, b) => a.path.localeCompare(b.path)),
+    [externalSessionGalleryItems, localSessionGalleryItems]
+  );
+  const sessionGalleryExternalSources = useMemo<SessionGalleryExternalSource[]>(
+    () =>
+      githubGallerySources.map((sourceState) => ({
+        id: sourceState.source.id,
+        label: sourceState.source.sourceLabel,
+        url: sourceState.source.url,
+        treePath: makeGitHubGallerySourceTreePath(sourceState.source),
+        itemCount: sourceState.items.length,
+        status: sourceState.status,
+        errorMessage: sourceState.errorMessage
+      })),
+    [githubGallerySources]
   );
   const sessionGalleryStorageInfo = useMemo<SessionGalleryStorageInfo>(
     () => ({
@@ -1600,6 +1648,168 @@ export function App(): JSX.Element {
     toastTimeoutIdsRef.current.push(timeoutId);
   }, []);
 
+  useEffect(() => {
+    if (githubGallerySourceLoadError === null) {
+      return;
+    }
+    pushToast(`GitHub gallery sources failed to load: ${githubGallerySourceLoadError}`, "error");
+    console.error(`[app] Failed to load persisted GitHub gallery sources: ${githubGallerySourceLoadError}`);
+    setGitHubGallerySourceLoadError(null);
+  }, [githubGallerySourceLoadError, pushToast]);
+
+  useEffect(() => {
+    try {
+      saveGitHubGallerySourceUrls(githubGallerySources.map((entry) => entry.source.url));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast(`Failed to save GitHub gallery source list: ${message}`, "error");
+      console.error(`[app] Failed to persist GitHub gallery source list: ${message}`);
+    }
+  }, [githubGallerySources, pushToast]);
+
+  const setGitHubGallerySourcesTracked = useCallback(
+    (updater: (prev: GitHubGallerySourceState[]) => GitHubGallerySourceState[]): void => {
+      setGitHubGallerySources((prev) => {
+        const next = updater(prev);
+        githubGallerySourcesRef.current = next;
+        return next;
+      });
+    },
+    []
+  );
+
+  const refreshGitHubGallerySource = useCallback(
+    async (sourceToRefresh: GitHubGalleryTreeSource, showSuccessToast = true): Promise<void> => {
+      const sourceId = sourceToRefresh.id;
+      setGitHubGallerySourcesTracked((prev) =>
+        prev.map((entry) => {
+          if (entry.source.id !== sourceId) {
+            return entry;
+          }
+          return {
+            ...entry,
+            status: "loading",
+            items: [],
+            errorMessage: null
+          };
+        })
+      );
+
+      console.info(`[app] Refreshing GitHub gallery source '${sourceToRefresh.sourceLabel}'.`);
+      try {
+        const items = await listGitHubGalleryPngEntries(sourceToRefresh);
+        setGitHubGallerySourcesTracked((prev) =>
+          prev.map((entry) =>
+            entry.source.id === sourceId
+              ? {
+                  ...entry,
+                  status: "ready",
+                  items,
+                  errorMessage: null
+                }
+              : entry
+          )
+        );
+        if (showSuccessToast) {
+          pushToast(
+            `Loaded ${items.length} PNG preview${items.length === 1 ? "" : "s"} from ${sourceToRefresh.sourceLabel}.`
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setGitHubGallerySourcesTracked((prev) =>
+          prev.map((entry) =>
+            entry.source.id === sourceId
+              ? {
+                  ...entry,
+                  status: "error",
+                  errorMessage: message
+                }
+              : entry
+          )
+        );
+        console.error(`[app] GitHub gallery source refresh failed for '${sourceToRefresh.sourceLabel}': ${message}`);
+        throw new Error(message);
+      }
+    },
+    [pushToast, setGitHubGallerySourcesTracked]
+  );
+
+  const refreshGitHubGallerySourceById = useCallback(
+    async (sourceId: string, showSuccessToast = true): Promise<void> => {
+      const sourceToRefresh = githubGallerySourcesRef.current.find((entry) => entry.source.id === sourceId)?.source ?? null;
+      if (sourceToRefresh === null) {
+        throw new Error(`GitHub gallery source '${sourceId}' was not found.`);
+      }
+      await refreshGitHubGallerySource(sourceToRefresh, showSuccessToast);
+    },
+    [refreshGitHubGallerySource]
+  );
+
+  const onAddExternalGitHubGallerySource = useCallback(
+    async (url: string): Promise<void> => {
+      const parsed = parseGitHubGalleryTreeUrl(url.trim());
+      if (githubGallerySourcesRef.current.some((entry) => entry.source.id === parsed.id)) {
+        throw new Error(`GitHub gallery source already added: ${parsed.sourceLabel}`);
+      }
+      const nextSourceState: GitHubGallerySourceState = {
+        source: parsed,
+        status: "idle",
+        items: [],
+        errorMessage: null
+      };
+      setGitHubGallerySourcesTracked((prev) =>
+        [...prev, nextSourceState].sort((a, b) => a.source.sourceLabel.localeCompare(b.source.sourceLabel))
+      );
+
+      try {
+        await refreshGitHubGallerySource(parsed, false);
+        pushToast(`Added GitHub gallery source: ${parsed.sourceLabel}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Added source, but initial load failed: ${message}`);
+      }
+    },
+    [pushToast, refreshGitHubGallerySource, setGitHubGallerySourcesTracked]
+  );
+
+  const onRefreshExternalGitHubGallerySource = useCallback(
+    async (sourceId: string): Promise<void> => {
+      try {
+        await refreshGitHubGallerySourceById(sourceId, true);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        pushToast(`GitHub source refresh failed: ${message}`, "error");
+      }
+    },
+    [pushToast, refreshGitHubGallerySourceById]
+  );
+
+  const onRemoveExternalGitHubGallerySource = useCallback(
+    (sourceId: string): void => {
+      const removedSource = githubGallerySourcesRef.current.find((entry) => entry.source.id === sourceId) ?? null;
+      setGitHubGallerySourcesTracked((prev) => prev.filter((entry) => entry.source.id !== sourceId));
+      if (removedSource !== null) {
+        pushToast(`Removed GitHub gallery source: ${removedSource.source.sourceLabel}`);
+      }
+    },
+    [pushToast, setGitHubGallerySourcesTracked]
+  );
+
+  useEffect(() => {
+    if (!sessionGalleryOpen) {
+      return;
+    }
+    for (const source of githubGallerySources) {
+      if (source.status === "idle") {
+        void refreshGitHubGallerySourceById(source.source.id, false).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          pushToast(`GitHub source refresh failed: ${message}`, "error");
+        });
+      }
+    }
+  }, [githubGallerySources, pushToast, refreshGitHubGallerySourceById, sessionGalleryOpen]);
+
   const applyDecodedLocalSessionsSnapshot = useCallback((decodedSnapshots: DecodedLocalSessionSnapshot[]): void => {
     const nextLocalSystemsByPath: Record<string, string> = {};
     const nextLocalPayloadsByPath: Record<string, SettingsClipboardPayload> = {};
@@ -1612,6 +1822,7 @@ export function App(): JSX.Element {
       nextLocalPayloadsByPath[snapshot.path] = snapshot.payload;
       nextLocalSnapshotsByPath[snapshot.path] = {
         pngBlob: snapshot.snapshotPngBlob,
+        createdAtMs: snapshot.createdAtMs,
         updatedAtMs: snapshot.updatedAtMs
       };
       const entryKey = makeLocalEntryKey(snapshot.path);
@@ -1677,6 +1888,7 @@ export function App(): JSX.Element {
       for (const snapshot of decodedSnapshots) {
         next[snapshot.path] = {
           pngBlob: snapshot.snapshotPngBlob,
+          createdAtMs: snapshot.createdAtMs,
           updatedAtMs: snapshot.updatedAtMs
         };
       }
@@ -1720,6 +1932,7 @@ export function App(): JSX.Element {
               payload,
               source,
               snapshotPngBlob: record.pngBlob,
+              createdAtMs: record.createdAtMs,
               updatedAtMs: record.updatedAtMs
             });
           } catch (error) {
@@ -3073,9 +3286,51 @@ export function App(): JSX.Element {
     }
   };
 
-  const onOpenSessionFromGallery = (localPath: string): void => {
-    setSessionGalleryOpen(false);
-    onSwitchSystem(makeLocalEntryKey(localPath));
+  const onOpenSessionFromGallery = (item: SessionGalleryItem): void => {
+    if (item.sourceKind === "local") {
+      if (item.localPath === undefined) {
+        pushToast("Local session entry is missing a local path.", "error");
+        return;
+      }
+      setSessionGalleryOpen(false);
+      onSwitchSystem(makeLocalEntryKey(item.localPath));
+      return;
+    }
+
+    if (item.sourceKind === "github") {
+      const remotePngUrl = item.remotePngUrl;
+      if (remotePngUrl === undefined) {
+        pushToast("GitHub gallery entry is missing a PNG URL.", "error");
+        return;
+      }
+      void (async () => {
+        setBlockingTask({
+          title: "Loading Remote Session PNG",
+          message: `Fetching '${item.path}'...`,
+          detail: remotePngUrl,
+          progress: null
+        });
+        try {
+          const response = await fetch(remotePngUrl, { method: "GET" });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} ${response.statusText}`);
+          }
+          const pngBytes = new Uint8Array(await response.arrayBuffer());
+          const payload = parseEmbeddedSessionPayloadFromPngBytes(pngBytes);
+          const fileName = item.path.split("/").pop() ?? item.path;
+          setSessionGalleryOpen(false);
+          queueOrApplySessionPngImport(payload, fileName);
+          console.info(`[app] Loaded remote gallery PNG session '${item.path}' from '${remotePngUrl}'.`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          pushToast(`Remote session PNG load failed: ${message}`, "error");
+          console.error(`[app] Failed to load remote gallery PNG '${item.path}': ${message}`);
+        } finally {
+          setBlockingTask(null);
+        }
+      })();
+      return;
+    }
   };
 
   const onDeleteSessionFromGallery = (localPath: string): void => {
@@ -3206,17 +3461,20 @@ export function App(): JSX.Element {
         if (!Number.isFinite(updatedAtMs)) {
           throw new Error(`ZIP entry '${entry.name}' has invalid modified timestamp.`);
         }
+        const createdAtMs = updatedAtMs;
 
         decodedSnapshots.push({
           path: localPath,
           payload,
           source,
           snapshotPngBlob: pngBlob,
+          createdAtMs,
           updatedAtMs
         });
         recordsToWrite.push({
           path: localPath,
           pngBlob,
+          createdAtMs,
           updatedAtMs
         });
       }
@@ -3509,6 +3767,7 @@ export function App(): JSX.Element {
     const width = LOCAL_SESSION_SNAPSHOT_PREVIEW_WIDTH;
     const height = Math.max(1, Math.round((LOCAL_SESSION_SNAPSHOT_PREVIEW_WIDTH * aspectHeight) / aspectWidth));
     const updatedAtMs = Date.now();
+    const createdAtMs = localSessionSnapshotsByPath[normalizedPath]?.createdAtMs ?? updatedAtMs;
 
     console.info(
       `[app] Saving session snapshot '${normalizedPath}' at ${width}x${height} (${LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES} subframes).`
@@ -3596,6 +3855,7 @@ export function App(): JSX.Element {
       await putSessionSnapshotRecord({
         path: normalizedPath,
         pngBlob: embeddedPngBlob,
+        createdAtMs,
         updatedAtMs
       });
     } finally {
@@ -3622,6 +3882,7 @@ export function App(): JSX.Element {
       ...prev,
       [normalizedPath]: {
         pngBlob: embeddedPngBlob as Blob,
+        createdAtMs,
         updatedAtMs
       }
     }));
@@ -3807,6 +4068,7 @@ export function App(): JSX.Element {
       await putSessionSnapshotRecord({
         path: normalizedRequestedPath,
         pngBlob: snapshot.pngBlob,
+        createdAtMs: snapshot.createdAtMs,
         updatedAtMs
       });
       await deleteSessionSnapshotRecord(fromPath);
@@ -3979,34 +4241,43 @@ export function App(): JSX.Element {
         }
         bottom={
           <section className="section-block section-fill">
-            <div className="section-header-row">
-              <div className="section-actions">
-                <AppButton onClick={() => compileSystem(selectedSystemKey)} disabled={isBlockingTaskActive}>
-                  Build (F5)
-                </AppButton>
+            <div className="section-header-row definition-actions-toolbar">
+              <div className="definition-actions-group definition-actions-group-main">
                 <AppButton
                   variant="primary"
+                  onClick={() => compileSystem(selectedSystemKey)}
+                  disabled={isBlockingTaskActive}
+                  title="Build (F5)"
+                >
+                  Build (F5)
+                </AppButton>
+              </div>
+              <div className="definition-actions-group definition-actions-group-session">
+                <AppButton
                   onClick={onSaveAsNewSession}
                   disabled={isBlockingTaskActive}
+                  title="Save as New Session"
                 >
-                  Save as New Session
+                  Save New
                 </AppButton>
                 <AppButton
                   onClick={() => void onUpdateCurrentSession()}
                   disabled={!canUpdateCurrentSession || isBlockingTaskActive}
+                  title={selectedLocalPath === null ? "Update Current Session (disabled on presets)" : "Update Current Session"}
                 >
-                  Update Session
+                  Update
                 </AppButton>
                 <div className="header-menu-anchor" ref={definitionActionsRef}>
                   <AppButton
                     variant="ghost"
-                    className="header-menu-trigger"
+                    className="header-menu-trigger definition-actions-more"
                     aria-label="Definition actions"
                     aria-haspopup="menu"
                     aria-expanded={definitionActionsOpen}
                     onClick={() => setDefinitionActionsOpen((prev) => !prev)}
+                    title="More actions"
                   >
-                    ...
+                    ⋯
                   </AppButton>
                   {definitionActionsOpen ? (
                     <div className="header-menu-popup" role="menu" aria-label="Definition actions menu">
@@ -4869,7 +5140,8 @@ export function App(): JSX.Element {
       />
       <SessionGalleryDialog
         open={sessionGalleryOpen}
-        items={localSessionGalleryItems}
+        items={sessionGalleryItems}
+        externalSources={sessionGalleryExternalSources}
         storageInfo={sessionGalleryStorageInfo}
         isBusy={isBlockingTaskActive}
         persistentStorageRequestInProgress={persistentStorageRequestInProgress}
@@ -4880,6 +5152,9 @@ export function App(): JSX.Element {
         onRequestPersistentStorage={onRequestPersistentStorage}
         onExportAll={() => void onExportAllSessionsZip()}
         onImportZip={onImportSessionsZip}
+        onAddExternalGitHubSource={onAddExternalGitHubGallerySource}
+        onRefreshExternalSource={onRefreshExternalGitHubGallerySource}
+        onRemoveExternalSource={onRemoveExternalGitHubGallerySource}
       />
       <ConfirmDeleteLocalSystemDialog
         open={deleteLocalDialogPath !== null}

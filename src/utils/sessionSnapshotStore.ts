@@ -1,13 +1,19 @@
 export interface SessionSnapshotRecord {
   path: string;
   pngBlob: Blob;
+  createdAtMs: number;
   updatedAtMs: number;
 }
 
-interface SessionSnapshotDbRecord extends SessionSnapshotRecord {}
+interface SessionSnapshotDbRecord {
+  path: string;
+  pngBlob: Blob;
+  createdAtMs?: number;
+  updatedAtMs: number;
+}
 
 const DB_NAME = "fragmentarium-web-session-snapshots-v1";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = "sessionSnapshots";
 
 function getIndexedDbOrThrow(): IDBFactory {
@@ -26,9 +32,20 @@ function openSessionSnapshotDb(): Promise<IDBDatabase> {
     };
     request.onupgradeneeded = () => {
       const db = request.result;
+      let store: IDBObjectStore;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: "path" });
+        store = db.createObjectStore(STORE_NAME, { keyPath: "path" });
+      } else {
+        if (request.transaction === null) {
+          throw new Error("IndexedDB upgrade transaction missing.");
+        }
+        store = request.transaction.objectStore(STORE_NAME);
+      }
+      if (!store.indexNames.contains("updatedAtMs")) {
         store.createIndex("updatedAtMs", "updatedAtMs", { unique: false });
+      }
+      if (!store.indexNames.contains("createdAtMs")) {
+        store.createIndex("createdAtMs", "createdAtMs", { unique: false });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -115,6 +132,8 @@ export async function listSessionSnapshotRecords(): Promise<SessionSnapshotRecor
         (record) =>
           typeof record.path === "string" &&
           record.path.trim().length > 0 &&
+          (record.createdAtMs === undefined ||
+            (typeof record.createdAtMs === "number" && Number.isFinite(record.createdAtMs))) &&
           typeof record.updatedAtMs === "number" &&
           Number.isFinite(record.updatedAtMs) &&
           record.pngBlob instanceof Blob
@@ -123,6 +142,9 @@ export async function listSessionSnapshotRecords(): Promise<SessionSnapshotRecor
       .map((record) => ({
         path: record.path,
         pngBlob: record.pngBlob,
+        createdAtMs: typeof record.createdAtMs === "number" && Number.isFinite(record.createdAtMs)
+          ? record.createdAtMs
+          : record.updatedAtMs,
         updatedAtMs: record.updatedAtMs
       }));
   });
@@ -135,6 +157,9 @@ export async function putSessionSnapshotRecord(record: SessionSnapshotRecord): P
   if (!(record.pngBlob instanceof Blob)) {
     throw new Error("Session snapshot PNG must be a Blob.");
   }
+  if (!Number.isFinite(record.createdAtMs)) {
+    throw new Error("Session snapshot createdAtMs must be finite.");
+  }
   if (!Number.isFinite(record.updatedAtMs)) {
     throw new Error("Session snapshot updatedAtMs must be finite.");
   }
@@ -143,6 +168,7 @@ export async function putSessionSnapshotRecord(record: SessionSnapshotRecord): P
     store.put({
       path: record.path,
       pngBlob: record.pngBlob,
+      createdAtMs: record.createdAtMs,
       updatedAtMs: record.updatedAtMs
     } satisfies SessionSnapshotDbRecord);
   });

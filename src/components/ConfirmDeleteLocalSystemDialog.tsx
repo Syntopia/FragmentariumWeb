@@ -25,14 +25,7 @@ export function ConfirmDeleteLocalSystemDialog(
   }
 
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          props.onCancel();
-        }
-      }}
-    >
+    <div className="modal-backdrop">
       <div
         className="modal-window"
         role="dialog"

@@ -35,14 +35,7 @@ export function HelpDialog(props: HelpDialogProps): JSX.Element | null {
   }
 
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          props.onClose();
-        }
-      }}
-    >
+    <div className="modal-backdrop">
       <div className="modal-window help-modal-window" role="dialog" aria-modal="true" aria-labelledby="help-dialog-title">
         <div className="help-modal-header">
           <div>

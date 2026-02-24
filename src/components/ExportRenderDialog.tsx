@@ -107,14 +107,7 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
     : "n/a";
 
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !props.isExporting) {
-          props.onClose();
-        }
-      }}
-    >
+    <div className="modal-backdrop">
       <div
         className="modal-window export-modal-window"
         style={{ transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` }}
