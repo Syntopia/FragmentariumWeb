@@ -67,6 +67,53 @@ export interface RendererExportProgress {
   tileCount: number;
 }
 
+export interface RendererGraphicsCapabilityStatus {
+  label: string;
+  required: boolean;
+  available: boolean;
+  detail?: string;
+}
+
+export interface RendererGraphicsDiagnostics {
+  webglVersion: string;
+  shadingLanguageVersion: string;
+  vendor: string;
+  renderer: string;
+  unmaskedVendor: string | null;
+  unmaskedRenderer: string | null;
+  angleInfo: string | null;
+  contextAttributes: {
+    alpha?: boolean;
+    antialias?: boolean;
+    depth?: boolean;
+    desynchronized?: boolean;
+    failIfMajorPerformanceCaveat?: boolean;
+    powerPreference?: string;
+    premultipliedAlpha?: boolean;
+    preserveDrawingBuffer?: boolean;
+    stencil?: boolean;
+    xrCompatible?: boolean;
+  } | null;
+  limits: {
+    maxTextureSize: number;
+    maxRenderbufferSize: number;
+    maxViewportDims: [number, number];
+    maxColorAttachments: number;
+    maxDrawBuffers: number;
+    maxTextureImageUnits: number;
+    maxCombinedTextureImageUnits: number;
+    maxFragmentUniformVectors: number;
+    maxSamples: number;
+  };
+  extensions: {
+    extColorBufferFloat: boolean;
+    extColorBufferHalfFloat: boolean;
+    webglDebugRendererInfo: boolean;
+    extDisjointTimerQueryWebgl2: boolean;
+  };
+  capabilities: RendererGraphicsCapabilityStatus[];
+}
+
 export interface RenderStillFrameOptions {
   width: number;
   height: number;
@@ -205,6 +252,92 @@ export class FragmentRenderer {
     this.displayProgram = createProgram(this.gl, displaySources.vertexSource, displaySources.fragmentSource);
 
     console.info("[renderer] WebGL2 initialized.");
+  }
+
+  getGraphicsDiagnostics(): RendererGraphicsDiagnostics {
+    const gl = this.gl;
+    const debugRendererInfo = gl.getExtension("WEBGL_debug_renderer_info");
+    const extColorBufferFloat = gl.getExtension("EXT_color_buffer_float");
+    const extColorBufferHalfFloat = gl.getExtension("EXT_color_buffer_half_float");
+    const extDisjointTimerQueryWebgl2 = gl.getExtension("EXT_disjoint_timer_query_webgl2");
+    const contextAttributes = gl.getContextAttributes();
+    const contextAttributesExtended = contextAttributes as (WebGLContextAttributes & {
+      desynchronized?: boolean;
+      failIfMajorPerformanceCaveat?: boolean;
+      powerPreference?: string;
+      xrCompatible?: boolean;
+    }) | null;
+    const rendererString = gl.getParameter(gl.RENDERER) as string;
+    const angleInfo = extractAngleInfo(rendererString);
+
+    const capabilities: RendererGraphicsCapabilityStatus[] = [
+      {
+        label: "WebGL2 context",
+        required: true,
+        available: true
+      },
+      {
+        label: "EXT_color_buffer_float",
+        required: true,
+        available: extColorBufferFloat !== null,
+        detail: extColorBufferFloat !== null ? "Required for progressive float accumulation targets" : undefined
+      },
+      {
+        label: "WEBGL_debug_renderer_info",
+        required: false,
+        available: debugRendererInfo !== null,
+        detail: "Allows unmasked GPU vendor/renderer strings"
+      }
+    ];
+
+    return {
+      webglVersion: gl.getParameter(gl.VERSION) as string,
+      shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION) as string,
+      vendor: gl.getParameter(gl.VENDOR) as string,
+      renderer: rendererString,
+      unmaskedVendor:
+        debugRendererInfo !== null
+          ? (gl.getParameter(debugRendererInfo.UNMASKED_VENDOR_WEBGL) as string)
+          : null,
+      unmaskedRenderer:
+        debugRendererInfo !== null
+          ? (gl.getParameter(debugRendererInfo.UNMASKED_RENDERER_WEBGL) as string)
+          : null,
+      angleInfo,
+      contextAttributes:
+        contextAttributesExtended === null
+          ? null
+          : {
+              alpha: contextAttributesExtended.alpha,
+              antialias: contextAttributesExtended.antialias,
+              depth: contextAttributesExtended.depth,
+              desynchronized: contextAttributesExtended.desynchronized,
+              failIfMajorPerformanceCaveat: contextAttributesExtended.failIfMajorPerformanceCaveat,
+              powerPreference: contextAttributesExtended.powerPreference,
+              premultipliedAlpha: contextAttributesExtended.premultipliedAlpha,
+              preserveDrawingBuffer: contextAttributesExtended.preserveDrawingBuffer,
+              stencil: contextAttributesExtended.stencil,
+              xrCompatible: contextAttributesExtended.xrCompatible
+            },
+      limits: {
+        maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
+        maxRenderbufferSize: gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number,
+        maxViewportDims: gl.getParameter(gl.MAX_VIEWPORT_DIMS) as [number, number],
+        maxColorAttachments: gl.getParameter(gl.MAX_COLOR_ATTACHMENTS) as number,
+        maxDrawBuffers: gl.getParameter(gl.MAX_DRAW_BUFFERS) as number,
+        maxTextureImageUnits: gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS) as number,
+        maxCombinedTextureImageUnits: gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number,
+        maxFragmentUniformVectors: gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS) as number,
+        maxSamples: gl.getParameter(gl.MAX_SAMPLES) as number
+      },
+      extensions: {
+        extColorBufferFloat: extColorBufferFloat !== null,
+        extColorBufferHalfFloat: extColorBufferHalfFloat !== null,
+        webglDebugRendererInfo: debugRendererInfo !== null,
+        extDisjointTimerQueryWebgl2: extDisjointTimerQueryWebgl2 !== null
+      },
+      capabilities
+    };
   }
 
   setScene(next: SceneState): void {
@@ -546,7 +679,8 @@ export class FragmentRenderer {
       }
 
       iterations += 1;
-      if ((iterations & 1) === 0) {
+      const shouldYield = options.onProgress !== undefined ? true : (iterations & 1) === 0;
+      if (shouldYield) {
         await waitForNextAnimationFrame();
       }
     }
@@ -1200,12 +1334,24 @@ export class FragmentRenderer {
   }
 }
 
+function extractAngleInfo(rendererString: string): string | null {
+  const angleIndex = rendererString.indexOf("ANGLE");
+  if (angleIndex < 0) {
+    return null;
+  }
+  return rendererString.slice(angleIndex).trim();
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
 function waitForNextAnimationFrame(): Promise<void> {
   return new Promise((resolve) => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      window.setTimeout(resolve, 0);
+      return;
+    }
     requestAnimationFrame(() => resolve());
   });
 }

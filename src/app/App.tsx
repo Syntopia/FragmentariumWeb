@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { DefinitionEditor } from "../components/DefinitionEditor";
 import { AppButton } from "../components/AppButton";
+import { BlockingTaskDialog } from "../components/BlockingTaskDialog";
 import { ConfirmDiscardChangesDialog } from "../components/ConfirmDiscardChangesDialog";
 import { ConfirmDeleteLocalSystemDialog } from "../components/ConfirmDeleteLocalSystemDialog";
 import { SaveLocalSystemDialog } from "../components/SaveLocalSystemDialog";
 import { ExportRenderDialog, type ExportRenderDialogProgress } from "../components/ExportRenderDialog";
 import { HelpDialog } from "../components/HelpDialog";
+import {
+  SessionGalleryDialog,
+  type SessionGalleryItem,
+  type SessionGalleryStorageInfo
+} from "../components/SessionGalleryDialog";
 import { SplitLayout } from "../components/SplitLayout";
 import {
   SystemsTreeView,
@@ -35,20 +41,28 @@ import type { ParseResult, ParsedPreset, UniformDefinition, UniformValue } from 
 import {
   DEFAULT_RENDER_SETTINGS,
   FragmentRenderer,
+  type RendererGraphicsDiagnostics,
   type RenderSettings,
   type SlicePlaneLockFrame,
   type RendererShaderErrorDetails,
   type RendererStatus
 } from "../core/render/renderer";
 import { FRACTAL_SYSTEMS, SYSTEM_INCLUDE_MAP, type FractalSystemDefinition } from "../systems/registry";
-import { loadStoredSessions, saveStoredSessions } from "../utils/sessionStore";
+import { embedSessionJsonInPng, extractSessionJsonFromPng } from "../utils/pngMetadata";
+import { makeUniqueSessionPath } from "../utils/sessionPathNaming";
+import {
+  deleteSessionSnapshotRecord,
+  listSessionSnapshotRecords,
+  putSessionSnapshotRecord,
+  type SessionSnapshotRecord
+} from "../utils/sessionSnapshotStore";
 import {
   WebCodecsWebmEncoder,
   checkWebCodecsMovieSupport,
   isWebCodecsMovieExportAvailable,
   type WebCodecsMovieCodec
 } from "../utils/webcodecsWebmEncoder";
-import { buildZipStoreBlob } from "../utils/zipStore";
+import { buildZipStoreBlob, parseZipStore } from "../utils/zipStore";
 import {
   applyInterpolationMode,
   buildChangedCameraSummaries,
@@ -85,7 +99,7 @@ import {
 } from "./settingsClipboard";
 import { buildDefaultUniformValuesForPreset, resetPostSettingsGroup, resetRenderSettingsGroup, resetUniformGroupValues } from "./settingsReset";
 import { getUniformGroupNames, normalizeUniformGroupName } from "./uniformGroups";
-import packageJson from "../../package.json";
+import buildVersion from "../../build-version.json";
 
 const MIN_PANE_WIDTH = 240;
 const MIN_LEFT_SECTION_HEIGHT = 140;
@@ -94,6 +108,14 @@ const EXPORT_STILL_TILE_SIZE = 1024;
 const DEFAULT_STARTUP_INTEGRATOR_ID = "de-pathtracer-physical";
 const ERROR_STRIP_PREVIEW_MAX_LINES = 12;
 const ERROR_STRIP_PREVIEW_MAX_CHARS = 2400;
+const LOCAL_SESSION_SNAPSHOT_PREVIEW_WIDTH = 400;
+const LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES = 15;
+const SESSION_PNG_PREVIEW_WIDTH = 500;
+const SESSION_PNG_PREVIEW_SUBFRAMES = 30;
+const SESSION_GALLERY_ZIP_ROOT = "sessions";
+const APP_VERSION_LABEL = `v${buildVersion.version}`;
+const APP_BUILD_DATE_LABEL = buildVersion.buildDate;
+const APP_TITLE = `Fragmentarium Web ${APP_VERSION_LABEL} (${APP_BUILD_DATE_LABEL})`;
 const LEGACY_INTEGRATOR_ID_MAP: Record<string, string> = {
   "de-pathtracer": "de-pathtracer-physical"
 };
@@ -161,6 +183,16 @@ interface SaveLocalDialogState {
   errorMessage: string | null;
 }
 
+interface PendingSessionPngImportState {
+  fileName: string;
+  payload: SettingsClipboardPayload;
+}
+
+interface LocalSessionSnapshotState {
+  pngBlob: Blob;
+  updatedAtMs: number;
+}
+
 interface ToastNotification {
   id: number;
   message: string;
@@ -208,6 +240,27 @@ interface ResolvedPresetExportState {
 interface ErrorStripPreview {
   text: string;
   truncated: boolean;
+}
+
+interface BlockingTaskState {
+  title: string;
+  message: string;
+  detail: string | null;
+  progress: number | null;
+}
+
+interface GalleryOriginStorageStatsState {
+  originUsageBytes: number | null;
+  originQuotaBytes: number | null;
+  persistentStorageStatus: SessionGalleryStorageInfo["persistentStorageStatus"];
+}
+
+interface DecodedLocalSessionSnapshot {
+  path: string;
+  payload: SettingsClipboardPayload;
+  source: string;
+  snapshotPngBlob: Blob;
+  updatedAtMs: number;
 }
 
 const PRESET_KEY_PREFIX = "preset:";
@@ -345,6 +398,12 @@ async function blobToUint8Array(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(buffer);
 }
 
+function uint8ArrayToBlob(data: Uint8Array, type: string): Blob {
+  const buffer = new ArrayBuffer(data.byteLength);
+  new Uint8Array(buffer).set(data);
+  return new Blob([buffer], { type });
+}
+
 function canvasToPngBlobLocal(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -365,6 +424,50 @@ function waitForUiFrame(): Promise<void> {
     }
     requestAnimationFrame(() => resolve());
   });
+}
+
+function isPngFile(file: File): boolean {
+  const lowerName = file.name.toLowerCase();
+  return file.type === "image/png" || lowerName.endsWith(".png");
+}
+
+function makeLocalSessionSnapshotZipEntryName(localPath: string): string {
+  const normalizedPath = normalizeLocalPath(localPath);
+  if (normalizedPath === null) {
+    throw new Error(`Cannot export invalid local session path '${localPath}'.`);
+  }
+  return `${SESSION_GALLERY_ZIP_ROOT}/${normalizedPath}.png`;
+}
+
+function parseLocalSessionSnapshotZipEntryName(entryName: string): string {
+  const normalizedName = entryName.replaceAll("\\", "/");
+  if (!normalizedName.toLowerCase().endsWith(".png")) {
+    throw new Error(`ZIP entry '${entryName}' is not a PNG file.`);
+  }
+  const pathWithoutExt = normalizedName.slice(0, -4);
+  const hasRootPrefix = pathWithoutExt.startsWith(`${SESSION_GALLERY_ZIP_ROOT}/`);
+  const rawPath = hasRootPrefix ? pathWithoutExt.slice(SESSION_GALLERY_ZIP_ROOT.length + 1) : pathWithoutExt;
+  const normalizedPath = normalizeLocalPath(rawPath);
+  if (normalizedPath === null) {
+    throw new Error(`ZIP entry '${entryName}' does not map to a valid session path.`);
+  }
+  return normalizedPath;
+}
+
+function parseEmbeddedSessionPayloadFromPngBytes(pngBytes: Uint8Array): SettingsClipboardPayload {
+  const embeddedSessionJson = extractSessionJsonFromPng(pngBytes);
+  if (embeddedSessionJson === null) {
+    throw new Error("PNG does not contain embedded Fragmentarium Web session data.");
+  }
+  return parseSettingsClipboardPayload(embeddedSessionJson);
+}
+
+function requireEmbeddedSystemSource(payload: SettingsClipboardPayload, sourceLabel: string): string {
+  const source = payload.systemDefinition?.source;
+  if (typeof source !== "string" || source.length === 0) {
+    throw new Error(`${sourceLabel} is missing embedded system source.`);
+  }
+  return source;
 }
 
 async function yieldToUiFrames(frameCount = 1): Promise<void> {
@@ -392,6 +495,11 @@ function findPresetSystemById(systemId: string): FractalSystemDefinition | null 
   return FRACTAL_SYSTEMS.find((entry) => entry.id === systemId) ?? null;
 }
 
+function getDefaultPresetEntryKey(): string {
+  const defaultSystemId = FRACTAL_SYSTEMS.find((system) => system.id === "mandelbulb")?.id ?? FRACTAL_SYSTEMS[0].id;
+  return makePresetEntryKey(defaultSystemId);
+}
+
 function makePresetEntryKey(systemId: string): string {
   return `${PRESET_KEY_PREFIX}${systemId}`;
 }
@@ -414,6 +522,24 @@ function parseLocalPathFromKey(entryKey: string): string | null {
   }
   const value = entryKey.slice(LOCAL_KEY_PREFIX.length);
   return value.length > 0 ? value : null;
+}
+
+function resolvePreferredPresetEntryKeyFromPayload(payload: SettingsClipboardPayload): string | null {
+  const raw = payload.systemDefinition?.selectedSystemKey;
+  if (raw === undefined || raw === null || raw.trim().length === 0) {
+    return null;
+  }
+
+  const embeddedPresetId = parsePresetIdFromKey(raw);
+  if (embeddedPresetId !== null && findPresetSystemById(embeddedPresetId) !== null) {
+    return makePresetEntryKey(embeddedPresetId);
+  }
+
+  if (findPresetSystemById(raw) !== null) {
+    return makePresetEntryKey(raw);
+  }
+
+  return null;
 }
 
 function filterToLocalEditorSources(
@@ -491,6 +617,16 @@ function migrateRecordKeys<T>(
   return next;
 }
 
+function renameRecordKey<T>(source: Record<string, T>, fromKey: string, toKey: string): Record<string, T> {
+  if (fromKey === toKey || source[fromKey] === undefined) {
+    return source;
+  }
+  const next = { ...source };
+  next[toKey] = next[fromKey] as T;
+  delete next[fromKey];
+  return next;
+}
+
 function isKnownSelectionKey(entryKey: string, localSystemsByPath: Record<string, string>): boolean {
   const presetId = parsePresetIdFromKey(entryKey);
   if (presetId !== null) {
@@ -504,13 +640,11 @@ function isKnownSelectionKey(entryKey: string, localSystemsByPath: Record<string
 }
 
 function buildInitialState(): InitialState {
-  const defaultSystemId = FRACTAL_SYSTEMS.find((system) => system.id === "mandelbulb")?.id ?? FRACTAL_SYSTEMS[0].id;
-  const fallbackSelectionKey = makePresetEntryKey(defaultSystemId);
-  const defaults: InitialState = {
+  return {
     leftPanePx: 380,
     rightPanePx: 380,
     leftSystemsPaneHeightPx: 220,
-    selectedSystemKey: fallbackSelectionKey,
+    selectedSystemKey: getDefaultPresetEntryKey(),
     activeIntegratorId: normalizeIntegratorId(undefined),
     localSystemsByPath: {},
     localSessionPayloadsByPath: {},
@@ -525,57 +659,6 @@ function buildInitialState(): InitialState {
     renderSettings: { ...DEFAULT_RENDER_SETTINGS },
     persistenceError: null
   };
-
-  try {
-    const storedSessions = loadStoredSessions();
-    if (Object.keys(storedSessions).length === 0) {
-      return defaults;
-    }
-
-    const nextSourcesByPath: Record<string, string> = {};
-    const nextPayloadsByPath: Record<string, SettingsClipboardPayload> = {};
-    const nextEditorSourceBySystem = { ...defaults.editorSourceBySystem };
-    const nextSlicePlaneLockFrameBySystem: Record<string, SlicePlaneLockFrame | null> = {};
-    const invalidPaths: string[] = [];
-
-    for (const [path, rawJson] of Object.entries(storedSessions)) {
-      try {
-        const payload = parseSettingsClipboardPayload(rawJson);
-        const source = payload.systemDefinition?.source;
-        if (typeof source !== "string" || source.length === 0) {
-          invalidPaths.push(path);
-          continue;
-        }
-        nextPayloadsByPath[path] = payload;
-        nextSourcesByPath[path] = source;
-        const entryKey = makeLocalEntryKey(path);
-        nextEditorSourceBySystem[entryKey] = source;
-        if (payload.slicePlaneLockFrame !== undefined) {
-          nextSlicePlaneLockFrameBySystem[entryKey] =
-            payload.slicePlaneLockFrame === null ? null : cloneSlicePlaneLockFrame(payload.slicePlaneLockFrame);
-        }
-      } catch {
-        invalidPaths.push(path);
-      }
-    }
-
-    return {
-      ...defaults,
-      localSystemsByPath: nextSourcesByPath,
-      localSessionPayloadsByPath: nextPayloadsByPath,
-      editorSourceBySystem: nextEditorSourceBySystem,
-      slicePlaneLockFrameBySystem: nextSlicePlaneLockFrameBySystem,
-      persistenceError:
-        invalidPaths.length > 0
-          ? `Skipped ${invalidPaths.length} invalid saved session${invalidPaths.length === 1 ? "" : "s"}.`
-          : null
-    };
-  } catch (error) {
-    return {
-      ...defaults,
-      persistenceError: error instanceof Error ? error.message : String(error)
-    };
-  }
 }
 
 function deriveCameraFromUniformValues(
@@ -944,6 +1027,8 @@ export function App(): JSX.Element {
 
   const [localSystemsByPath, setLocalSystemsByPath] = useState(initial.localSystemsByPath);
   const [localSessionPayloadsByPath, setLocalSessionPayloadsByPath] = useState(initial.localSessionPayloadsByPath);
+  const [localSessionSnapshotsByPath, setLocalSessionSnapshotsByPath] = useState<Record<string, LocalSessionSnapshotState>>({});
+  const [localSessionPreviewUrlsByPath, setLocalSessionPreviewUrlsByPath] = useState<Record<string, string>>({});
   const [editorSourceBySystem, setEditorSourceBySystem] = useState(initial.editorSourceBySystem);
   const [uniformValuesBySystem, setUniformValuesBySystem] = useState(initial.uniformValuesBySystem);
   const [cameraBySystem, setCameraBySystem] = useState(initial.cameraBySystem);
@@ -958,11 +1043,23 @@ export function App(): JSX.Element {
   const [saveLocalDialog, setSaveLocalDialog] = useState<SaveLocalDialogState | null>(null);
   const [deleteLocalDialogPath, setDeleteLocalDialogPath] = useState<string | null>(null);
   const [pendingSwitchEntryKey, setPendingSwitchEntryKey] = useState<string | null>(null);
+  const [pendingSessionPngImport, setPendingSessionPngImport] = useState<PendingSessionPngImportState | null>(null);
+  const [dropImportOverlayVisible, setDropImportOverlayVisible] = useState(false);
   const [definitionActionsOpen, setDefinitionActionsOpen] = useState(false);
   const [settingsCopyActionsOpen, setSettingsCopyActionsOpen] = useState(false);
+  const [sessionPngExportInProgress, setSessionPngExportInProgress] = useState(false);
+  const [sessionGalleryOpen, setSessionGalleryOpen] = useState(false);
+  const [galleryOriginStorageStats, setGalleryOriginStorageStats] = useState<GalleryOriginStorageStatsState>({
+    originUsageBytes: null,
+    originQuotaBytes: null,
+    persistentStorageStatus: "unknown"
+  });
+  const [persistentStorageRequestInProgress, setPersistentStorageRequestInProgress] = useState(false);
+  const [blockingTask, setBlockingTask] = useState<BlockingTaskState | null>(null);
   const [exportDialogState, setExportDialogState] = useState<ExportDialogState | null>(null);
   const [exportProgressState, setExportProgressState] = useState<ExportProgressState | null>(null);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
+  const [graphicsDiagnostics, setGraphicsDiagnostics] = useState<RendererGraphicsDiagnostics | null>(null);
   const [activeUniformGroupBySystem, setActiveUniformGroupBySystem] = useState<Record<string, string>>({});
   const nextToastIdRef = useRef(1);
   const toastTimeoutIdsRef = useRef<number[]>([]);
@@ -970,6 +1067,7 @@ export function App(): JSX.Element {
   const settingsCopyActionsRef = useRef<HTMLDivElement>(null);
   const exportAbortControllerRef = useRef<AbortController | null>(null);
   const exportPreviewSnapshotRef = useRef<ExportPreviewSnapshot | null>(null);
+  const fileDragDepthRef = useRef(0);
 
   const [parsedBySystem, setParsedBySystem] = useState<Record<string, ParseResult>>({});
   const [activePresetBySystem, setActivePresetBySystem] = useState<Record<string, string>>({});
@@ -985,6 +1083,10 @@ export function App(): JSX.Element {
   });
   const [shaderError, setShaderError] = useState<string | null>(null);
   const [shaderErrorDetails, setShaderErrorDetails] = useState<RendererShaderErrorDetails | null>(null);
+
+  useEffect(() => {
+    document.title = APP_TITLE;
+  }, []);
   const [compileError, setCompileError] = useState<string | null>(initial.persistenceError);
   const [editorJumpRequest, setEditorJumpRequest] = useState<EditorJumpRequest | null>(null);
   const nextEditorJumpTokenRef = useRef(1);
@@ -1075,7 +1177,6 @@ export function App(): JSX.Element {
   const slicePlaneLockFrame = slicePlaneLockFrameBySystem[selectedSystemKey] ?? null;
   const hasSourceChanges = sourceDraft !== baselineSource;
   const isEditingLocalSystem = selectedLocalPath !== null;
-  const saveButtonLabel = isEditingLocalSystem ? "Update Session" : "Save Session";
   const saveDialogNormalizedPath =
     saveLocalDialog === null ? null : normalizeLocalPath(saveLocalDialog.pathValue);
   const saveDialogIsOverwrite =
@@ -1085,6 +1186,42 @@ export function App(): JSX.Element {
     () => buildSystemsTreeNodes(localSystemsByPath),
     [localSystemsByPath]
   );
+  const localSessionSnapshotStorageBytes = useMemo(
+    () =>
+      Object.values(localSessionSnapshotsByPath).reduce(
+        (sum, snapshot) => sum + Math.max(0, Math.trunc(snapshot.pngBlob.size)),
+        0
+      ),
+    [localSessionSnapshotsByPath]
+  );
+  const localSessionGalleryItems = useMemo<SessionGalleryItem[]>(
+    () =>
+      Object.entries(localSessionSnapshotsByPath)
+        .map(([path, snapshot]) => {
+          const previewUrl = localSessionPreviewUrlsByPath[path];
+          if (previewUrl === undefined) {
+            return null;
+          }
+          return {
+            path,
+            previewUrl,
+            updatedAtMs: snapshot.updatedAtMs
+          } satisfies SessionGalleryItem;
+        })
+        .filter((entry): entry is SessionGalleryItem => entry !== null)
+        .sort((a, b) => a.path.localeCompare(b.path)),
+    [localSessionPreviewUrlsByPath, localSessionSnapshotsByPath]
+  );
+  const sessionGalleryStorageInfo = useMemo<SessionGalleryStorageInfo>(
+    () => ({
+      snapshotStorageBytes: localSessionSnapshotStorageBytes,
+      originUsageBytes: galleryOriginStorageStats.originUsageBytes,
+      originQuotaBytes: galleryOriginStorageStats.originQuotaBytes,
+      persistentStorageStatus: galleryOriginStorageStats.persistentStorageStatus
+    }),
+    [galleryOriginStorageStats, localSessionSnapshotStorageBytes]
+  );
+  const isBlockingTaskActive = blockingTask !== null;
   const pendingSwitchTargetLabel = useMemo(() => {
     if (pendingSwitchEntryKey === null) {
       return null;
@@ -1099,6 +1236,12 @@ export function App(): JSX.Element {
     }
     return pendingSwitchEntryKey;
   }, [pendingSwitchEntryKey]);
+  const pendingDiscardTargetLabel = useMemo(() => {
+    if (pendingSessionPngImport !== null) {
+      return `Session PNG/${pendingSessionPngImport.fileName}`;
+    }
+    return pendingSwitchTargetLabel;
+  }, [pendingSessionPngImport, pendingSwitchTargetLabel]);
   const currentSessionPayloadSerialized = useMemo(
     () =>
       serializeSettingsClipboardPayloadForSessionComparison(
@@ -1138,6 +1281,7 @@ export function App(): JSX.Element {
       : null;
   const hasSessionChanges =
     selectedLocalPath === null ? true : currentSessionPayloadSerialized !== savedSelectedSessionPayloadSerialized;
+  const canUpdateCurrentSession = isEditingLocalSystem && hasSessionChanges;
   const webCodecsMovieAvailable = isWebCodecsMovieExportAvailable();
 
   const exportPresetNames = parseResult?.presets.map((preset) => preset.name) ?? [];
@@ -1361,8 +1505,7 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!isKnownSelectionKey(selectedSystemKey, localSystemsByPath)) {
-      const defaultId = FRACTAL_SYSTEMS.find((system) => system.id === "mandelbulb")?.id ?? FRACTAL_SYSTEMS[0].id;
-      setSelectedSystemKey(makePresetEntryKey(defaultId));
+      setSelectedSystemKey(getDefaultPresetEntryKey());
     }
   }, [localSystemsByPath, selectedSystemKey]);
 
@@ -1399,11 +1542,20 @@ export function App(): JSX.Element {
   }, [activeIntegratorOptions.slicePlaneLock, cameraState, selectedSystemKey]);
 
   useEffect(() => {
-    const serialized = Object.fromEntries(
-      Object.entries(localSessionPayloadsByPath).map(([path, payload]) => [path, serializeSettingsClipboardPayload(payload)])
-    );
-    saveStoredSessions(serialized);
-  }, [localSessionPayloadsByPath]);
+    const urls: string[] = [];
+    const nextUrls: Record<string, string> = {};
+    for (const [path, snapshot] of Object.entries(localSessionSnapshotsByPath)) {
+      const url = URL.createObjectURL(snapshot.pngBlob);
+      urls.push(url);
+      nextUrls[path] = url;
+    }
+    setLocalSessionPreviewUrlsByPath(nextUrls);
+    return () => {
+      for (const url of urls) {
+        URL.revokeObjectURL(url);
+      }
+    };
+  }, [localSessionSnapshotsByPath]);
 
   useEffect(() => {
     return () => {
@@ -1447,6 +1599,272 @@ export function App(): JSX.Element {
     }, 5000);
     toastTimeoutIdsRef.current.push(timeoutId);
   }, []);
+
+  const applyDecodedLocalSessionsSnapshot = useCallback((decodedSnapshots: DecodedLocalSessionSnapshot[]): void => {
+    const nextLocalSystemsByPath: Record<string, string> = {};
+    const nextLocalPayloadsByPath: Record<string, SettingsClipboardPayload> = {};
+    const nextLocalSnapshotsByPath: Record<string, LocalSessionSnapshotState> = {};
+    const nextLocalEditorSourceByKey: Record<string, string> = {};
+    const nextLocalSliceLockByKey: Record<string, SlicePlaneLockFrame | null> = {};
+
+    for (const snapshot of decodedSnapshots) {
+      nextLocalSystemsByPath[snapshot.path] = snapshot.source;
+      nextLocalPayloadsByPath[snapshot.path] = snapshot.payload;
+      nextLocalSnapshotsByPath[snapshot.path] = {
+        pngBlob: snapshot.snapshotPngBlob,
+        updatedAtMs: snapshot.updatedAtMs
+      };
+      const entryKey = makeLocalEntryKey(snapshot.path);
+      nextLocalEditorSourceByKey[entryKey] = snapshot.source;
+      if (snapshot.payload.slicePlaneLockFrame !== undefined) {
+        nextLocalSliceLockByKey[entryKey] =
+          snapshot.payload.slicePlaneLockFrame === null ? null : cloneSlicePlaneLockFrame(snapshot.payload.slicePlaneLockFrame);
+      }
+    }
+
+    setLocalSystemsByPath(nextLocalSystemsByPath);
+    setLocalSessionPayloadsByPath(nextLocalPayloadsByPath);
+    setLocalSessionSnapshotsByPath(nextLocalSnapshotsByPath);
+    setEditorSourceBySystem((prev) => {
+      const next: Record<string, string> = {};
+      for (const [entryKey, source] of Object.entries(prev)) {
+        if (parseLocalPathFromKey(entryKey) !== null) {
+          continue;
+        }
+        next[entryKey] = source;
+      }
+      return {
+        ...next,
+        ...nextLocalEditorSourceByKey
+      };
+    });
+    setSlicePlaneLockFrameBySystem((prev) => {
+      const next: Record<string, SlicePlaneLockFrame | null> = {};
+      for (const [entryKey, frame] of Object.entries(prev)) {
+        if (parseLocalPathFromKey(entryKey) !== null) {
+          continue;
+        }
+        next[entryKey] = frame;
+      }
+      return {
+        ...next,
+        ...nextLocalSliceLockByKey
+      };
+    });
+  }, []);
+
+  const upsertDecodedLocalSessionSnapshots = useCallback((decodedSnapshots: DecodedLocalSessionSnapshot[]): void => {
+    if (decodedSnapshots.length === 0) {
+      return;
+    }
+
+    setLocalSystemsByPath((prev) => {
+      const next = { ...prev };
+      for (const snapshot of decodedSnapshots) {
+        next[snapshot.path] = snapshot.source;
+      }
+      return next;
+    });
+    setLocalSessionPayloadsByPath((prev) => {
+      const next = { ...prev };
+      for (const snapshot of decodedSnapshots) {
+        next[snapshot.path] = snapshot.payload;
+      }
+      return next;
+    });
+    setLocalSessionSnapshotsByPath((prev) => {
+      const next = { ...prev };
+      for (const snapshot of decodedSnapshots) {
+        next[snapshot.path] = {
+          pngBlob: snapshot.snapshotPngBlob,
+          updatedAtMs: snapshot.updatedAtMs
+        };
+      }
+      return next;
+    });
+    setEditorSourceBySystem((prev) => {
+      const next = { ...prev };
+      for (const snapshot of decodedSnapshots) {
+        next[makeLocalEntryKey(snapshot.path)] = snapshot.source;
+      }
+      return next;
+    });
+    setSlicePlaneLockFrameBySystem((prev) => {
+      const next = { ...prev };
+      for (const snapshot of decodedSnapshots) {
+        const entryKey = makeLocalEntryKey(snapshot.path);
+        next[entryKey] =
+          snapshot.payload.slicePlaneLockFrame === undefined || snapshot.payload.slicePlaneLockFrame === null
+            ? null
+            : cloneSlicePlaneLockFrame(snapshot.payload.slicePlaneLockFrame);
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      console.info("[app] Loading local session snapshots from IndexedDB.");
+      try {
+        const records = await listSessionSnapshotRecords();
+        const decodedSnapshots: DecodedLocalSessionSnapshot[] = [];
+        let invalidCount = 0;
+        for (const record of records) {
+          try {
+            const pngBytes = await blobToUint8Array(record.pngBlob);
+            const payload = parseEmbeddedSessionPayloadFromPngBytes(pngBytes);
+            const source = requireEmbeddedSystemSource(payload, `Session snapshot '${record.path}'`);
+            decodedSnapshots.push({
+              path: record.path,
+              payload,
+              source,
+              snapshotPngBlob: record.pngBlob,
+              updatedAtMs: record.updatedAtMs
+            });
+          } catch (error) {
+            invalidCount += 1;
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(`[app] Failed to decode local session snapshot '${record.path}': ${message}`);
+          }
+        }
+        if (cancelled) {
+          return;
+        }
+        applyDecodedLocalSessionsSnapshot(decodedSnapshots);
+        console.info(`[app] Loaded ${decodedSnapshots.length} local session snapshot(s) from IndexedDB.`);
+        if (invalidCount > 0) {
+          pushToast(`Skipped ${invalidCount} invalid saved session snapshot${invalidCount === 1 ? "" : "s"}.`, "error");
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        pushToast(`Local session snapshot load failed: ${message}`, "error");
+        console.error(`[app] Failed to load local session snapshots: ${message}`);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyDecodedLocalSessionsSnapshot, pushToast]);
+
+  useEffect(() => {
+    if (!sessionGalleryOpen) {
+      return;
+    }
+
+    const storageManager = navigator.storage;
+    if (storageManager === undefined) {
+      setGalleryOriginStorageStats({
+        originUsageBytes: null,
+        originQuotaBytes: null,
+        persistentStorageStatus: "unavailable"
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setGalleryOriginStorageStats((prev) => ({
+      ...prev,
+      persistentStorageStatus:
+        prev.persistentStorageStatus === "unavailable" ? "unavailable" : "unknown"
+    }));
+
+    void (async () => {
+      try {
+        const [estimate, persisted] = await Promise.all([
+          storageManager.estimate().catch(() => null),
+          typeof storageManager.persisted === "function" ? storageManager.persisted().catch(() => null) : Promise.resolve(null)
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setGalleryOriginStorageStats({
+          originUsageBytes:
+            estimate !== null && typeof estimate.usage === "number" && Number.isFinite(estimate.usage)
+              ? estimate.usage
+              : null,
+          originQuotaBytes:
+            estimate !== null && typeof estimate.quota === "number" && Number.isFinite(estimate.quota)
+              ? estimate.quota
+              : null,
+          persistentStorageStatus:
+            persisted === null ? "unknown" : persisted ? "enabled" : "disabled"
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        console.error(
+          `[app] Failed to query browser storage estimate for gallery: ${error instanceof Error ? error.message : String(error)}`
+        );
+        setGalleryOriginStorageStats((prev) => ({
+          ...prev,
+          persistentStorageStatus:
+            prev.persistentStorageStatus === "unavailable" ? "unavailable" : "unknown"
+        }));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [localSessionSnapshotsByPath, sessionGalleryOpen]);
+
+  const onRequestPersistentStorage = async (): Promise<void> => {
+    if (persistentStorageRequestInProgress) {
+      return;
+    }
+
+    const storageManager = navigator.storage;
+    if (storageManager === undefined || typeof storageManager.persist !== "function") {
+      setGalleryOriginStorageStats((prev) => ({
+        ...prev,
+        persistentStorageStatus: "unavailable"
+      }));
+      pushToast("Persistent storage request is unavailable in this browser.", "error");
+      console.error("[app] navigator.storage.persist() is unavailable.");
+      return;
+    }
+
+    setPersistentStorageRequestInProgress(true);
+    console.info("[app] Requesting persistent storage for this origin.");
+    try {
+      const granted = await storageManager.persist();
+      const [estimate, persisted] = await Promise.all([
+        storageManager.estimate().catch(() => null),
+        typeof storageManager.persisted === "function" ? storageManager.persisted().catch(() => null) : Promise.resolve(null)
+      ]);
+
+      setGalleryOriginStorageStats({
+        originUsageBytes:
+          estimate !== null && typeof estimate.usage === "number" && Number.isFinite(estimate.usage) ? estimate.usage : null,
+        originQuotaBytes:
+          estimate !== null && typeof estimate.quota === "number" && Number.isFinite(estimate.quota) ? estimate.quota : null,
+        persistentStorageStatus:
+          persisted === null ? (granted ? "enabled" : "unknown") : persisted ? "enabled" : "disabled"
+      });
+
+      if (granted) {
+        pushToast("Persistent storage enabled for this browser origin.");
+        console.info("[app] Persistent storage request granted.");
+      } else {
+        pushToast("Persistent storage request was not granted by the browser.", "error");
+        console.info("[app] Persistent storage request not granted.");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast(`Persistent storage request failed: ${message}`, "error");
+      console.error(`[app] Persistent storage request failed: ${message}`);
+    } finally {
+      setPersistentStorageRequestInProgress(false);
+    }
+  };
 
   const onViewportError = useCallback((error: RendererShaderErrorDetails | string | null): void => {
     if (error === null) {
@@ -1879,6 +2297,7 @@ export function App(): JSX.Element {
         integrator: activeIntegrator,
         integratorOptions: activeIntegratorOptions
       });
+      exportRenderer.updateSlicePlaneLockFrame(slicePlaneLockFrame);
 
       movieEncoder = new WebCodecsWebmEncoder(
         {
@@ -2062,8 +2481,10 @@ export function App(): JSX.Element {
 
     const exportStartedMs = performance.now();
     const STILL_RENDER_PROGRESS_START = 0.02;
-    const STILL_RENDER_PROGRESS_END = 0.94;
-    const STILL_ENCODE_PROGRESS = 0.985;
+    const STILL_RENDER_PROGRESS_END = 0.86;
+    const STILL_READBACK_PROGRESS = 0.91;
+    const STILL_ENCODE_PROGRESS = 0.965;
+    const STILL_METADATA_PROGRESS = 0.985;
     const STILL_DOWNLOAD_PREP_PROGRESS = 0.995;
 
     const updateProgress = (overallProgress: number, currentFrameIndex: number, totalFrames: number, stageLabel: string): void => {
@@ -2104,6 +2525,7 @@ export function App(): JSX.Element {
         integrator: activeIntegrator,
         integratorOptions: activeIntegratorOptions
       });
+      exportRenderer.updateSlicePlaneLockFrame(slicePlaneLockFrame);
 
       const systemStem = sanitizeFileStem(selectedSystemTreePath);
 
@@ -2201,9 +2623,20 @@ export function App(): JSX.Element {
           if (abortController.signal.aborted) {
             throw createExportAbortErrorLocal();
           }
+          updateProgress(STILL_READBACK_PROGRESS, 0, 1, "Reading pixels...");
+          await yieldToUiFrames();
+          const outputImage = exportRenderer.captureDisplayImageData();
           updateProgress(STILL_ENCODE_PROGRESS, 0, 1, "Encoding PNG...");
           await yieldToUiFrames();
-          pngBlob = await exportRenderer.captureDisplayPngBlob();
+          const outputCanvas = document.createElement("canvas");
+          outputCanvas.width = outputImage.width;
+          outputCanvas.height = outputImage.height;
+          const ctx2d = outputCanvas.getContext("2d");
+          if (ctx2d === null) {
+            throw new Error("2D canvas context is unavailable for PNG export.");
+          }
+          ctx2d.putImageData(outputImage, 0, 0);
+          pngBlob = await canvasToPngBlobLocal(outputCanvas);
         }
         if (abortController.signal.aborted) {
           throw createExportAbortErrorLocal();
@@ -2212,8 +2645,32 @@ export function App(): JSX.Element {
         updateProgress(STILL_DOWNLOAD_PREP_PROGRESS, 0, 1, "Preparing download...");
         await yieldToUiFrames();
 
+        const sessionPayload = buildSettingsClipboardPayload({
+          selectedPresetName: activePresetBySystem[selectedSystemKey] ?? null,
+          integratorId: activeIntegratorId,
+          integratorOptions: activeIntegratorOptions,
+          renderSettings,
+          uniformValues,
+          camera: cameraState,
+          slicePlaneLockFrame,
+          systemDefinition: {
+            source: sourceDraft,
+            treePath: selectedSystemTreePath,
+            sourcePath: selectedSystemSourcePath,
+            selectedSystemKey
+          }
+        });
+        const sessionJson = serializeSettingsClipboardPayload(sessionPayload);
+        updateProgress(STILL_METADATA_PROGRESS, 0, 1, "Embedding session metadata...");
+        await yieldToUiFrames();
+        const pngBytes = await blobToUint8Array(pngBlob);
+        const embeddedPngBytes = embedSessionJsonInPng(pngBytes, sessionJson);
+        const embeddedPngBuffer = new ArrayBuffer(embeddedPngBytes.byteLength);
+        new Uint8Array(embeddedPngBuffer).set(embeddedPngBytes);
+        const embeddedPngBlob = new Blob([embeddedPngBuffer], { type: "image/png" });
+
         downloadBlob(
-          pngBlob,
+          embeddedPngBlob,
           `${systemStem}_${dialogSnapshot.width}x${dialogSnapshot.height}.png`
         );
         updateProgress(1, 0, 1, "Still exported.");
@@ -2361,6 +2818,108 @@ export function App(): JSX.Element {
     }
   };
 
+  const applySettingsClipboardPayloadToSystem = (
+    payload: SettingsClipboardPayload,
+    sourceLabel: "clipboard" | "png",
+    targetEntryKey: string
+  ): void => {
+    let targetParseResult = parsedBySystem[targetEntryKey] ?? null;
+
+    if (payload.systemDefinition !== undefined) {
+      const incomingSource = payload.systemDefinition.source;
+      setEditorSourceBySystem((prev) => ({
+        ...prev,
+        [targetEntryKey]: incomingSource
+      }));
+
+      try {
+        const parsedIncoming = parseFragmentSource({
+          source: incomingSource,
+          sourceName: getSourceName(targetEntryKey),
+          includeMap: SYSTEM_INCLUDE_MAP
+        });
+        targetParseResult = parsedIncoming;
+        setParsedBySystem((prev) => ({
+          ...prev,
+          [targetEntryKey]: parsedIncoming
+        }));
+        setCompileError(null);
+        console.info(`[app] Applied embedded system definition from ${sourceLabel} into '${targetEntryKey}'.`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setCompileError(message);
+        throw new Error(`Embedded system definition failed to compile: ${message}`);
+      }
+    }
+
+    const nextIntegratorId = normalizeIntegratorId(payload.integratorId);
+    const hasIntegrator = INTEGRATORS.some((entry) => entry.id === nextIntegratorId);
+    if (!hasIntegrator) {
+      throw new Error(`${sourceLabel.toUpperCase()} payload references unknown integrator '${payload.integratorId}'.`);
+    }
+    setActiveIntegratorId(nextIntegratorId);
+
+    const nextIntegratorOptions = coerceIntegratorOptionsForId(nextIntegratorId, payload.integratorOptions);
+    setIntegratorOptionsById((prev) => ({
+      ...prev,
+      [nextIntegratorId]: nextIntegratorOptions
+    }));
+
+    setRenderSettings(coerceRenderSettings(payload.renderSettings));
+    setSlicePlaneLockFrameBySystem((prev) => ({
+      ...prev,
+      [targetEntryKey]:
+        payload.slicePlaneLockFrame === undefined || payload.slicePlaneLockFrame === null
+          ? null
+          : cloneSlicePlaneLockFrame(payload.slicePlaneLockFrame)
+    }));
+
+    if (targetParseResult !== null) {
+      const nextUniformValues = coerceUniformValues(targetParseResult.uniforms, payload.uniformValues);
+      const nextCamera = deriveCameraFromUniformValues(targetParseResult.uniforms, nextUniformValues, payload.camera);
+
+      setUniformValuesBySystem((prev) => ({
+        ...prev,
+        [targetEntryKey]: nextUniformValues
+      }));
+      setCameraBySystem((prev) => ({
+        ...prev,
+        [targetEntryKey]: nextCamera
+      }));
+
+      if (payload.selectedPresetName !== null) {
+        const presetName = payload.selectedPresetName;
+        const presetExists = targetParseResult.presets.some((preset) => preset.name === presetName);
+        if (presetExists) {
+          setActivePresetBySystem((prev) => ({
+            ...prev,
+            [targetEntryKey]: presetName
+          }));
+        }
+      }
+    } else {
+      setUniformValuesBySystem((prev) => ({
+        ...prev,
+        [targetEntryKey]: payload.uniformValues
+      }));
+      setCameraBySystem((prev) => ({
+        ...prev,
+        [targetEntryKey]: payload.camera
+      }));
+    }
+
+    if (selectedSystemKey !== targetEntryKey) {
+      setSelectedSystemKey(targetEntryKey);
+    }
+  };
+
+  const applySettingsClipboardPayloadToCurrentSystem = (
+    payload: SettingsClipboardPayload,
+    sourceLabel: "clipboard" | "png"
+  ): void => {
+    applySettingsClipboardPayloadToSystem(payload, sourceLabel, selectedSystemKey);
+  };
+
   const onPasteSettingsFromClipboard = async (): Promise<void> => {
     try {
       if (navigator.clipboard === undefined || typeof navigator.clipboard.readText !== "function") {
@@ -2369,91 +2928,7 @@ export function App(): JSX.Element {
 
       const raw = await navigator.clipboard.readText();
       const payload = parseSettingsClipboardPayload(raw);
-      let targetParseResult = parseResult;
-
-      if (payload.systemDefinition !== undefined) {
-        const incomingSource = payload.systemDefinition.source;
-        setEditorSourceBySystem((prev) => ({
-          ...prev,
-          [selectedSystemKey]: incomingSource
-        }));
-
-        try {
-          const parsedIncoming = parseFragmentSource({
-            source: incomingSource,
-            sourceName: getSourceName(selectedSystemKey),
-            includeMap: SYSTEM_INCLUDE_MAP
-          });
-          targetParseResult = parsedIncoming;
-          setParsedBySystem((prev) => ({
-            ...prev,
-            [selectedSystemKey]: parsedIncoming
-          }));
-          setCompileError(null);
-          console.info(`[app] Applied embedded system definition from clipboard into '${selectedSystemKey}'.`);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          setCompileError(message);
-          throw new Error(`Embedded system definition failed to compile: ${message}`);
-        }
-      }
-
-      const nextIntegratorId = normalizeIntegratorId(payload.integratorId);
-      const hasIntegrator = INTEGRATORS.some((entry) => entry.id === nextIntegratorId);
-      if (!hasIntegrator) {
-        throw new Error(`Clipboard payload references unknown integrator '${payload.integratorId}'.`);
-      }
-      setActiveIntegratorId(nextIntegratorId);
-
-      const nextIntegratorOptions = coerceIntegratorOptionsForId(nextIntegratorId, payload.integratorOptions);
-      setIntegratorOptionsById((prev) => ({
-        ...prev,
-        [nextIntegratorId]: nextIntegratorOptions
-      }));
-
-      const nextRenderSettings = coerceRenderSettings(payload.renderSettings);
-      setRenderSettings(nextRenderSettings);
-      setSlicePlaneLockFrameBySystem((prev) => ({
-        ...prev,
-        [selectedSystemKey]:
-          payload.slicePlaneLockFrame === undefined || payload.slicePlaneLockFrame === null
-            ? null
-            : cloneSlicePlaneLockFrame(payload.slicePlaneLockFrame)
-      }));
-
-      if (targetParseResult !== null) {
-        const nextUniformValues = coerceUniformValues(targetParseResult.uniforms, payload.uniformValues);
-        const nextCamera = deriveCameraFromUniformValues(targetParseResult.uniforms, nextUniformValues, payload.camera);
-
-        setUniformValuesBySystem((prev) => ({
-          ...prev,
-          [selectedSystemKey]: nextUniformValues
-        }));
-        setCameraBySystem((prev) => ({
-          ...prev,
-          [selectedSystemKey]: nextCamera
-        }));
-
-        if (payload.selectedPresetName !== null) {
-          const presetName = payload.selectedPresetName;
-          const presetExists = targetParseResult.presets.some((preset) => preset.name === presetName);
-          if (presetExists) {
-            setActivePresetBySystem((prev) => ({
-              ...prev,
-              [selectedSystemKey]: presetName
-            }));
-          }
-        }
-      } else {
-        setUniformValuesBySystem((prev) => ({
-          ...prev,
-          [selectedSystemKey]: payload.uniformValues
-        }));
-        setCameraBySystem((prev) => ({
-          ...prev,
-          [selectedSystemKey]: payload.camera
-        }));
-      }
+      applySettingsClipboardPayloadToCurrentSystem(payload, "clipboard");
 
       pushToast("Session JSON pasted from clipboard.");
       console.info(`[app] Pasted session JSON into '${selectedSystemKey}'.`);
@@ -2462,6 +2937,405 @@ export function App(): JSX.Element {
       pushToast(`Paste failed: ${message}`, "error");
       console.error(`[app] Failed to paste settings: ${message}`);
     }
+  };
+
+  const shouldWarnBeforeReplacingCurrentSession = (): boolean => {
+    let shouldWarn = hasSourceChanges;
+    if (selectedLocalPath !== null) {
+      shouldWarn = hasSessionChanges;
+    }
+    return shouldWarn;
+  };
+
+  const completeSessionPngImport = (payload: SettingsClipboardPayload, fileName: string): void => {
+    const targetEntryKey =
+      selectedLocalPath !== null
+        ? (resolvePreferredPresetEntryKeyFromPayload(payload) ?? getDefaultPresetEntryKey())
+        : selectedSystemKey;
+    applySettingsClipboardPayloadToSystem(payload, "png", targetEntryKey);
+    pushToast(`Session loaded from PNG: ${fileName}`);
+    console.info(`[app] Loaded session from PNG '${fileName}' into '${targetEntryKey}'.`);
+  };
+
+  const queueOrApplySessionPngImport = (payload: SettingsClipboardPayload, fileName: string): void => {
+    if (shouldWarnBeforeReplacingCurrentSession()) {
+      setPendingSessionPngImport({ fileName, payload });
+      return;
+    }
+    completeSessionPngImport(payload, fileName);
+  };
+
+  const importSessionFromPngFile = async (file: File): Promise<void> => {
+    if (!isPngFile(file)) {
+      throw new Error(`'${file.name}' is not a PNG file.`);
+    }
+
+    const pngBytes = await blobToUint8Array(file);
+    const embeddedSessionJson = extractSessionJsonFromPng(pngBytes);
+    if (embeddedSessionJson === null) {
+      throw new Error(`PNG '${file.name}' does not contain embedded Fragmentarium Web session data.`);
+    }
+
+    const payload = parseSettingsClipboardPayload(embeddedSessionJson);
+    queueOrApplySessionPngImport(payload, file.name);
+  };
+
+  const onDownloadSessionPng = async (): Promise<void> => {
+    setDefinitionActionsOpen(false);
+
+    if (sessionPngExportInProgress) {
+      return;
+    }
+    if (parseResult === null) {
+      pushToast("Compile a system before exporting Session PNG.", "error");
+      return;
+    }
+
+    const payload = buildSettingsClipboardPayload({
+      selectedPresetName: activePresetBySystem[selectedSystemKey] ?? null,
+      integratorId: activeIntegratorId,
+      integratorOptions: activeIntegratorOptions,
+      renderSettings,
+      uniformValues,
+      camera: cameraState,
+      slicePlaneLockFrame,
+      systemDefinition: {
+        source: sourceDraft,
+        treePath: selectedSystemTreePath,
+        sourcePath: selectedSystemSourcePath,
+        selectedSystemKey
+      }
+    });
+    const sessionJson = serializeSettingsClipboardPayload(payload);
+
+    const aspectWidth = Math.max(1, Math.round(status.resolution[0]));
+    const aspectHeight = Math.max(1, Math.round(status.resolution[1]));
+    const width = SESSION_PNG_PREVIEW_WIDTH;
+    const height = Math.max(1, Math.round((SESSION_PNG_PREVIEW_WIDTH * aspectHeight) / aspectWidth));
+
+    console.info(
+      `[app] Exporting session PNG preview for '${selectedSystemKey}' at ${width}x${height} (${SESSION_PNG_PREVIEW_SUBFRAMES} subframes).`
+    );
+    setSessionPngExportInProgress(true);
+
+    const offscreenCanvas = document.createElement("canvas");
+    let exportRenderer: FragmentRenderer | null = null;
+    try {
+      await yieldToUiFrames(1);
+
+      exportRenderer = new FragmentRenderer(offscreenCanvas, {
+        onStatus: () => {
+          // no-op for session PNG preview export
+        }
+      });
+      exportRenderer.setRenderSettings({
+        ...renderSettings,
+        interactionResolutionScale: 1,
+        tileCount: 1,
+        tilesPerFrame: 1,
+        maxSubframes: SESSION_PNG_PREVIEW_SUBFRAMES
+      });
+      exportRenderer.setScene({
+        geometrySource: parseResult.shaderSource,
+        geometryLineMap: parseResult.shaderLineMap,
+        uniformDefinitions: parseResult.uniforms,
+        uniformValues,
+        integrator: activeIntegrator,
+        integratorOptions: activeIntegratorOptions
+      });
+      exportRenderer.updateIntegratorOptions(activeIntegratorOptions);
+      exportRenderer.updateUniformValues(uniformValues);
+      exportRenderer.updateSlicePlaneLockFrame(slicePlaneLockFrame);
+      exportRenderer.setCamera(cameraState);
+
+      const previewPngBlob = await exportRenderer.renderStillToPngBlob({
+        width,
+        height,
+        subframes: SESSION_PNG_PREVIEW_SUBFRAMES
+      });
+      const previewPngBytes = await blobToUint8Array(previewPngBlob);
+      const embeddedPngBytes = embedSessionJsonInPng(previewPngBytes, sessionJson);
+      const embeddedPngBuffer = new ArrayBuffer(embeddedPngBytes.byteLength);
+      new Uint8Array(embeddedPngBuffer).set(embeddedPngBytes);
+      const embeddedPngBlob = new Blob([embeddedPngBuffer], { type: "image/png" });
+      const fileName = `${sanitizeFileStem(selectedSystemTreePath)}_session.png`;
+      downloadBlob(embeddedPngBlob, fileName);
+
+      pushToast("Session PNG exported.");
+      console.info(`[app] Session PNG exported: ${fileName}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast(`Session PNG export failed: ${message}`, "error");
+      console.error(`[app] Session PNG export failed for '${selectedSystemKey}': ${message}`);
+    } finally {
+      exportRenderer?.destroy();
+      setSessionPngExportInProgress(false);
+    }
+  };
+
+  const onOpenSessionFromGallery = (localPath: string): void => {
+    setSessionGalleryOpen(false);
+    onSwitchSystem(makeLocalEntryKey(localPath));
+  };
+
+  const onDeleteSessionFromGallery = (localPath: string): void => {
+    setDeleteLocalDialogPath(localPath);
+  };
+
+  const onExportAllSessionsZip = async (): Promise<void> => {
+    const entriesByPath = Object.entries(localSessionSnapshotsByPath).sort(([a], [b]) => a.localeCompare(b));
+    if (entriesByPath.length === 0) {
+      pushToast("No local session snapshots to export.", "error");
+      return;
+    }
+
+    setBlockingTask({
+      title: "Exporting Session Gallery",
+      message: "Collecting snapshot PNGs...",
+      detail: `0/${entriesByPath.length}`,
+      progress: 0
+    });
+
+    try {
+      await yieldToUiFrames(1);
+      const zipEntries: Array<{ name: string; data: Uint8Array; modifiedAt?: Date }> = [];
+      for (let index = 0; index < entriesByPath.length; index += 1) {
+        const [path, snapshot] = entriesByPath[index];
+        setBlockingTask((prev) =>
+          prev === null
+            ? prev
+            : {
+                ...prev,
+                message: `Packing '${path}'...`,
+                detail: `${index + 1}/${entriesByPath.length}`,
+                progress: (index / entriesByPath.length) * 0.8
+              }
+        );
+        zipEntries.push({
+          name: makeLocalSessionSnapshotZipEntryName(path),
+          data: await blobToUint8Array(snapshot.pngBlob),
+          modifiedAt: new Date(snapshot.updatedAtMs)
+        });
+      }
+
+      setBlockingTask((prev) =>
+        prev === null
+          ? prev
+          : {
+              ...prev,
+              message: "Building ZIP archive...",
+              detail: `${entriesByPath.length} session snapshot PNGs`,
+              progress: 0.92
+            }
+      );
+      const zipBlob = buildZipStoreBlob(zipEntries);
+      const fileName = `fragmentarium-web-session-gallery-${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}.zip`;
+      downloadBlob(zipBlob, fileName);
+      setBlockingTask((prev) =>
+        prev === null
+          ? prev
+          : {
+              ...prev,
+              message: "Session gallery ZIP exported.",
+              detail: fileName,
+              progress: 1
+            }
+      );
+      await yieldToUiFrames(1);
+      pushToast(`Exported ${entriesByPath.length} session snapshot${entriesByPath.length === 1 ? "" : "s"} as ZIP.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast(`Session gallery export failed: ${message}`, "error");
+      console.error(`[app] Session gallery ZIP export failed: ${message}`);
+    } finally {
+      setBlockingTask(null);
+    }
+  };
+
+  const onImportSessionsZip = async (file: File): Promise<void> => {
+    const lowerName = file.name.toLowerCase();
+    if (!(file.type === "application/zip" || lowerName.endsWith(".zip"))) {
+      pushToast(`'${file.name}' is not a ZIP file.`, "error");
+      return;
+    }
+
+    setBlockingTask({
+      title: "Importing Session Gallery ZIP",
+      message: `Reading '${file.name}'...`,
+      detail: null,
+      progress: 0
+    });
+
+    try {
+      await yieldToUiFrames(1);
+      const zipBytes = await blobToUint8Array(file);
+      setBlockingTask((prev) =>
+        prev === null ? prev : { ...prev, message: "Parsing ZIP entries...", progress: 0.08 }
+      );
+      const parsedEntries = parseZipStore(zipBytes).filter((entry) => !entry.name.endsWith("/"));
+      if (parsedEntries.length === 0) {
+        throw new Error("ZIP does not contain any files.");
+      }
+
+      const decodedSnapshots: DecodedLocalSessionSnapshot[] = [];
+      const recordsToWrite: SessionSnapshotRecord[] = [];
+      const occupiedPaths = new Set<string>(Object.keys(localSessionSnapshotsByPath));
+      let renamedCount = 0;
+      for (let index = 0; index < parsedEntries.length; index += 1) {
+        const entry = parsedEntries[index];
+        setBlockingTask((prev) =>
+          prev === null
+            ? prev
+            : {
+                ...prev,
+                message: `Validating '${entry.name}'...`,
+                detail: `${index + 1}/${parsedEntries.length}`,
+                progress: 0.1 + (index / parsedEntries.length) * 0.35
+              }
+        );
+        const parsedLocalPath = parseLocalSessionSnapshotZipEntryName(entry.name);
+        const localPath = makeUniqueSessionPath(parsedLocalPath, occupiedPaths);
+        if (localPath !== parsedLocalPath) {
+          renamedCount += 1;
+        }
+        occupiedPaths.add(localPath);
+        const payload = parseEmbeddedSessionPayloadFromPngBytes(entry.data);
+        const source = requireEmbeddedSystemSource(payload, `ZIP entry '${entry.name}'`);
+        const pngBlob = uint8ArrayToBlob(entry.data, "image/png");
+        const updatedAtMs = entry.modifiedAt?.getTime() ?? Date.now();
+        if (!Number.isFinite(updatedAtMs)) {
+          throw new Error(`ZIP entry '${entry.name}' has invalid modified timestamp.`);
+        }
+
+        decodedSnapshots.push({
+          path: localPath,
+          payload,
+          source,
+          snapshotPngBlob: pngBlob,
+          updatedAtMs
+        });
+        recordsToWrite.push({
+          path: localPath,
+          pngBlob,
+          updatedAtMs
+        });
+      }
+
+      for (let index = 0; index < recordsToWrite.length; index += 1) {
+        const record = recordsToWrite[index];
+        setBlockingTask((prev) =>
+          prev === null
+            ? prev
+            : {
+                ...prev,
+                message: `Writing '${record.path}' to local database...`,
+                detail: `${index + 1}/${recordsToWrite.length}`,
+                progress: 0.5 + (index / recordsToWrite.length) * 0.45
+              }
+        );
+        await putSessionSnapshotRecord(record);
+      }
+
+      upsertDecodedLocalSessionSnapshots(decodedSnapshots);
+      setBlockingTask((prev) =>
+        prev === null
+          ? prev
+          : {
+              ...prev,
+              message: `Imported ${decodedSnapshots.length} session snapshot${decodedSnapshots.length === 1 ? "" : "s"}.`,
+              detail: file.name,
+              progress: 1
+            }
+      );
+      await yieldToUiFrames(1);
+      pushToast(
+        `Imported ${decodedSnapshots.length} session snapshot${decodedSnapshots.length === 1 ? "" : "s"} from ZIP${
+          renamedCount > 0 ? ` (${renamedCount} renamed)` : ""
+        }.`
+      );
+      console.info(`[app] Imported ${decodedSnapshots.length} local session snapshot(s) from ZIP '${file.name}'.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast(`Session gallery import failed: ${message}`, "error");
+      console.error(`[app] Session gallery ZIP import failed: ${message}`);
+    } finally {
+      setBlockingTask(null);
+    }
+  };
+
+  const onAppDragOver = (event: ReactDragEvent<HTMLDivElement>): void => {
+    if (event.dataTransfer.types.includes("Files")) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      if (!dropImportOverlayVisible) {
+        setDropImportOverlayVisible(true);
+      }
+    }
+  };
+
+  const onAppDragEnter = (event: ReactDragEvent<HTMLDivElement>): void => {
+    if (!event.dataTransfer.types.includes("Files")) {
+      return;
+    }
+    event.preventDefault();
+    fileDragDepthRef.current += 1;
+    setDropImportOverlayVisible(true);
+  };
+
+  const onAppDragLeave = (event: ReactDragEvent<HTMLDivElement>): void => {
+    if (!event.dataTransfer.types.includes("Files")) {
+      return;
+    }
+    event.preventDefault();
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+    if (fileDragDepthRef.current === 0) {
+      setDropImportOverlayVisible(false);
+    }
+  };
+
+  const onAppDrop = (event: ReactDragEvent<HTMLDivElement>): void => {
+    if (!event.dataTransfer.types.includes("Files")) {
+      return;
+    }
+    event.preventDefault();
+    fileDragDepthRef.current = 0;
+    setDropImportOverlayVisible(false);
+
+    if (isBlockingTaskActive) {
+      pushToast("Finish the current task before importing.", "error");
+      return;
+    }
+
+    if (pendingSwitchEntryKey !== null || pendingSessionPngImport !== null) {
+      pushToast("Finish the pending discard confirmation before importing a Session PNG.", "error");
+      return;
+    }
+
+    const files = [...event.dataTransfer.files];
+    if (files.length !== 1) {
+      pushToast("Drop exactly one PNG file to import a session.", "error");
+      return;
+    }
+
+    void (async () => {
+      try {
+        const file = files[0];
+        const lowerName = file.name.toLowerCase();
+        if (isPngFile(file)) {
+          await importSessionFromPngFile(file);
+          return;
+        }
+        if (file.type === "application/zip" || lowerName.endsWith(".zip")) {
+          await onImportSessionsZip(file);
+          return;
+        }
+        throw new Error(`'${file.name}' is not a PNG or ZIP file.`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        pushToast(`Import failed: ${message}`, "error");
+        console.error(`[app] File import failed: ${message}`);
+      }
+    })();
   };
 
   const onCopyErrorToClipboard = async (): Promise<void> => {
@@ -2583,9 +3457,22 @@ export function App(): JSX.Element {
 
   const onCancelDiscardSwitchDialog = (): void => {
     setPendingSwitchEntryKey(null);
+    setPendingSessionPngImport(null);
   };
 
   const onConfirmDiscardSwitchDialog = (): void => {
+    if (pendingSessionPngImport !== null) {
+      const pending = pendingSessionPngImport;
+      setPendingSessionPngImport(null);
+      try {
+        completeSessionPngImport(pending.payload, pending.fileName);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        pushToast(`Session PNG import failed: ${message}`, "error");
+        console.error(`[app] Session PNG import failed after discard confirm: ${message}`);
+      }
+      return;
+    }
     if (pendingSwitchEntryKey === null) {
       return;
     }
@@ -2594,7 +3481,11 @@ export function App(): JSX.Element {
     performSwitchSystem(nextEntryKey);
   };
 
-  const saveSourceToLocalPath = (normalizedPath: string): void => {
+  const saveSourceToLocalPath = async (normalizedPath: string): Promise<void> => {
+    if (parseResult === null) {
+      throw new Error("Compile the current system before saving a local session snapshot.");
+    }
+
     const targetEntryKey = makeLocalEntryKey(normalizedPath);
     const payload = buildSettingsClipboardPayload({
       selectedPresetName: activePresetBySystem[selectedSystemKey] ?? null,
@@ -2611,6 +3502,109 @@ export function App(): JSX.Element {
         selectedSystemKey
       }
     });
+    const sessionJson = serializeSettingsClipboardPayload(payload);
+
+    const aspectWidth = Math.max(1, Math.round(status.resolution[0]));
+    const aspectHeight = Math.max(1, Math.round(status.resolution[1]));
+    const width = LOCAL_SESSION_SNAPSHOT_PREVIEW_WIDTH;
+    const height = Math.max(1, Math.round((LOCAL_SESSION_SNAPSHOT_PREVIEW_WIDTH * aspectHeight) / aspectWidth));
+    const updatedAtMs = Date.now();
+
+    console.info(
+      `[app] Saving session snapshot '${normalizedPath}' at ${width}x${height} (${LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES} subframes).`
+    );
+
+    setBlockingTask({
+      title: "Saving Session Snapshot",
+      message: `Rendering preview for '${normalizedPath}'...`,
+      detail: `${width}x${height}, ${LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES} subframes`,
+      progress: 0
+    });
+
+    const offscreenCanvas = document.createElement("canvas");
+    let exportRenderer: FragmentRenderer | null = null;
+    let embeddedPngBlob: Blob | null = null;
+    try {
+      await yieldToUiFrames(1);
+
+      exportRenderer = new FragmentRenderer(offscreenCanvas, {
+        onStatus: (nextStatus) => {
+          const targetSubframes = Math.max(1, LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES);
+          const subframeProgress = Math.max(0, Math.min(1, nextStatus.subframe / targetSubframes));
+          setBlockingTask((prev) =>
+            prev === null
+              ? prev
+              : {
+                  ...prev,
+                  message: `Rendering preview for '${normalizedPath}'...`,
+                  detail: `Subframe ${Math.min(nextStatus.subframe, targetSubframes)}/${targetSubframes}`,
+                  progress: subframeProgress * 0.8
+                }
+          );
+        }
+      });
+      exportRenderer.setRenderSettings({
+        ...renderSettings,
+        interactionResolutionScale: 1,
+        tileCount: 1,
+        tilesPerFrame: 1,
+        maxSubframes: LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES
+      });
+      exportRenderer.setScene({
+        geometrySource: parseResult.shaderSource,
+        geometryLineMap: parseResult.shaderLineMap,
+        uniformDefinitions: parseResult.uniforms,
+        uniformValues,
+        integrator: activeIntegrator,
+        integratorOptions: activeIntegratorOptions
+      });
+      exportRenderer.updateIntegratorOptions(activeIntegratorOptions);
+      exportRenderer.updateUniformValues(uniformValues);
+      exportRenderer.updateSlicePlaneLockFrame(slicePlaneLockFrame);
+      exportRenderer.setCamera(cameraState);
+
+      const previewPngBlob = await exportRenderer.renderStillToPngBlob({
+        width,
+        height,
+        subframes: LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES
+      });
+
+      setBlockingTask((prev) =>
+        prev === null
+          ? prev
+          : {
+              ...prev,
+              message: `Embedding session metadata for '${normalizedPath}'...`,
+              detail: "Writing PNG iTXt metadata chunk",
+              progress: 0.9
+            }
+      );
+      const previewPngBytes = await blobToUint8Array(previewPngBlob);
+      const embeddedPngBytes = embedSessionJsonInPng(previewPngBytes, sessionJson);
+      embeddedPngBlob = uint8ArrayToBlob(embeddedPngBytes, "image/png");
+
+      setBlockingTask((prev) =>
+        prev === null
+          ? prev
+          : {
+              ...prev,
+              message: `Writing snapshot '${normalizedPath}' to local database...`,
+              detail: "IndexedDB commit",
+              progress: 0.96
+            }
+      );
+      await putSessionSnapshotRecord({
+        path: normalizedPath,
+        pngBlob: embeddedPngBlob,
+        updatedAtMs
+      });
+    } finally {
+      exportRenderer?.destroy();
+    }
+
+    if (embeddedPngBlob === null) {
+      throw new Error("Session snapshot PNG generation failed.");
+    }
 
     setLocalSessionPayloadsByPath((prev) => ({
       ...prev,
@@ -2623,6 +3617,13 @@ export function App(): JSX.Element {
     setEditorSourceBySystem((prev) => ({
       ...prev,
       [targetEntryKey]: sourceDraft
+    }));
+    setLocalSessionSnapshotsByPath((prev) => ({
+      ...prev,
+      [normalizedPath]: {
+        pngBlob: embeddedPngBlob as Blob,
+        updatedAtMs
+      }
     }));
     setUniformValuesBySystem((prev) => {
       const current = prev[selectedSystemKey];
@@ -2664,6 +3665,14 @@ export function App(): JSX.Element {
       [targetEntryKey]: slicePlaneLockFrame === null ? null : cloneSlicePlaneLockFrame(slicePlaneLockFrame)
     }));
     setSelectedSystemKey(targetEntryKey);
+    setBlockingTask({
+      title: "Saving Session Snapshot",
+      message: `Saved '${normalizedPath}'.`,
+      detail: "Finalizing UI state...",
+      progress: 1
+    });
+    await yieldToUiFrames(1);
+    setBlockingTask(null);
     pushToast(`Session saved: ${normalizedPath}`);
   };
 
@@ -2671,6 +3680,11 @@ export function App(): JSX.Element {
     const entryKey = makeLocalEntryKey(localPath);
 
     setLocalSessionPayloadsByPath((prev) => {
+      const next = { ...prev };
+      delete next[localPath];
+      return next;
+    });
+    setLocalSessionSnapshotsByPath((prev) => {
       const next = { ...prev };
       delete next[localPath];
       return next;
@@ -2712,66 +3726,170 @@ export function App(): JSX.Element {
     });
 
     if (selectedSystemKey === entryKey) {
-      const defaultId = FRACTAL_SYSTEMS.find((system) => system.id === "mandelbulb")?.id ?? FRACTAL_SYSTEMS[0].id;
-      setSelectedSystemKey(makePresetEntryKey(defaultId));
+      setSelectedSystemKey(getDefaultPresetEntryKey());
     }
+  };
+
+  const renameLocalSystemByPathInState = (fromPath: string, toPath: string): void => {
+    if (fromPath === toPath) {
+      return;
+    }
+    const fromEntryKey = makeLocalEntryKey(fromPath);
+    const toEntryKey = makeLocalEntryKey(toPath);
+
+    setLocalSessionPayloadsByPath((prev) => {
+      if (prev[fromPath] === undefined) {
+        return prev;
+      }
+      const next = { ...prev };
+      next[toPath] = next[fromPath] as SettingsClipboardPayload;
+      delete next[fromPath];
+      return next;
+    });
+    setLocalSessionSnapshotsByPath((prev) => {
+      if (prev[fromPath] === undefined) {
+        return prev;
+      }
+      const next = { ...prev };
+      next[toPath] = next[fromPath] as LocalSessionSnapshotState;
+      delete next[fromPath];
+      return next;
+    });
+    setLocalSystemsByPath((prev) => {
+      if (prev[fromPath] === undefined) {
+        return prev;
+      }
+      const next = { ...prev };
+      next[toPath] = next[fromPath] as string;
+      delete next[fromPath];
+      return next;
+    });
+    setEditorSourceBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
+    setParsedBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
+    setUniformValuesBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
+    setCameraBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
+    setActivePresetBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
+    setSlicePlaneLockFrameBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
+    setActiveUniformGroupBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
+    setSelectedSystemKey((prev) => (prev === fromEntryKey ? toEntryKey : prev));
   };
 
   const onDeleteLocalSystem = (localPath: string): void => {
     setDeleteLocalDialogPath(localPath);
   };
 
-  const onConfirmDeleteLocalSystem = (): void => {
+  const onRenameSessionFromGallery = async (fromPath: string, requestedPath: string): Promise<void> => {
+    const normalizedRequestedPath = normalizeLocalPath(requestedPath);
+    if (normalizedRequestedPath === null) {
+      throw new Error("Invalid session path. Please use a non-empty path like 'folder/name'.");
+    }
+    if (normalizedRequestedPath === fromPath) {
+      return;
+    }
+    if (localSessionSnapshotsByPath[fromPath] === undefined) {
+      throw new Error(`Session '${fromPath}' no longer exists.`);
+    }
+    if (localSessionSnapshotsByPath[normalizedRequestedPath] !== undefined) {
+      throw new Error(`A session named '${normalizedRequestedPath}' already exists.`);
+    }
+
+    const snapshot = localSessionSnapshotsByPath[fromPath] as LocalSessionSnapshotState;
+    const updatedAtMs = Date.now();
+
+    setBlockingTask({
+      title: "Renaming Session",
+      message: `Renaming '${fromPath}' to '${normalizedRequestedPath}'...`,
+      detail: "Updating local database",
+      progress: null
+    });
+
+    try {
+      await putSessionSnapshotRecord({
+        path: normalizedRequestedPath,
+        pngBlob: snapshot.pngBlob,
+        updatedAtMs
+      });
+      await deleteSessionSnapshotRecord(fromPath);
+
+      renameLocalSystemByPathInState(fromPath, normalizedRequestedPath);
+      setLocalSessionSnapshotsByPath((prev) => {
+        const renamed = prev[normalizedRequestedPath];
+        if (renamed === undefined) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [normalizedRequestedPath]: {
+            ...renamed,
+            updatedAtMs
+          }
+        };
+      });
+      pushToast(`Session renamed to '${normalizedRequestedPath}'.`);
+      console.info(`[app] Renamed local session '${fromPath}' -> '${normalizedRequestedPath}'.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[app] Failed to rename local session '${fromPath}' -> '${normalizedRequestedPath}': ${message}`);
+      throw error instanceof Error ? error : new Error(String(error));
+    } finally {
+      setBlockingTask(null);
+    }
+  };
+
+  const onConfirmDeleteLocalSystem = async (): Promise<void> => {
     if (deleteLocalDialogPath === null) {
       return;
     }
-    deleteLocalSystemByPath(deleteLocalDialogPath);
+    const localPath = deleteLocalDialogPath;
+    setBlockingTask({
+      title: "Deleting Session",
+      message: `Removing '${localPath}' from local database...`,
+      detail: "IndexedDB delete",
+      progress: null
+    });
+    try {
+      await deleteSessionSnapshotRecord(localPath);
+      deleteLocalSystemByPath(localPath);
+      setBlockingTask(null);
+      pushToast(`Session deleted: ${localPath}`);
+    } catch (error) {
+      setBlockingTask(null);
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast(`Delete failed: ${message}`, "error");
+      console.error(`[app] Failed to delete local session '${localPath}': ${message}`);
+      return;
+    }
     setDeleteLocalDialogPath(null);
   };
 
-  const onSaveOrUpdateSource = (): void => {
-    if (!hasSessionChanges) {
-      return;
-    }
-
-    if (isEditingLocalSystem && selectedLocalPath !== null) {
-      const payload = buildSettingsClipboardPayload({
-        selectedPresetName: activePresetBySystem[selectedSystemKey] ?? null,
-        integratorId: activeIntegratorId,
-        integratorOptions: activeIntegratorOptions,
-        renderSettings,
-        uniformValues,
-        camera: cameraState,
-        slicePlaneLockFrame,
-        systemDefinition: {
-          source: sourceDraft,
-          treePath: selectedSystemTreePath,
-          sourcePath: selectedSystemSourcePath,
-          selectedSystemKey
-        }
-      });
-      setLocalSessionPayloadsByPath((prev) => ({
-        ...prev,
-        [selectedLocalPath]: payload
-      }));
-      setLocalSystemsByPath((prev) => ({
-        ...prev,
-        [selectedLocalPath]: sourceDraft
-      }));
-      setEditorSourceBySystem((prev) => ({
-        ...prev,
-        [selectedSystemKey]: sourceDraft
-      }));
-      pushToast("Session updated.");
-      return;
-    }
-
-    const suggestedName =
-      selectedPresetSystem !== null ? `${selectedPresetSystem.id}/my-session` : "sessions/custom";
+  const onSaveAsNewSession = (): void => {
+    const occupiedPaths = Object.keys(localSessionSnapshotsByPath);
+    const baseSuggestedName =
+      selectedLocalPath !== null
+        ? selectedLocalPath
+        : selectedPresetSystem !== null
+          ? `${selectedPresetSystem.id}/my-session`
+          : "sessions/custom";
+    const suggestedName = makeUniqueSessionPath(baseSuggestedName, occupiedPaths);
     setSaveLocalDialog({
       pathValue: suggestedName,
       errorMessage: null
     });
+  };
+
+  const onUpdateCurrentSession = async (): Promise<void> => {
+    if (selectedLocalPath === null || !hasSessionChanges) {
+      return;
+    }
+
+    try {
+      await saveSourceToLocalPath(selectedLocalPath);
+    } catch (error) {
+      setBlockingTask(null);
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast(`Session update failed: ${message}`, "error");
+      console.error(`[app] Failed to update local session '${selectedLocalPath}': ${message}`);
+    }
   };
 
   const onBeautifySource = (): void => {
@@ -2793,7 +3911,7 @@ export function App(): JSX.Element {
     setSaveLocalDialog(null);
   };
 
-  const onConfirmSaveLocalDialog = (): void => {
+  const onConfirmSaveLocalDialog = async (): Promise<void> => {
     if (saveLocalDialog === null) {
       return;
     }
@@ -2812,8 +3930,15 @@ export function App(): JSX.Element {
       return;
     }
 
-    saveSourceToLocalPath(normalizedPath);
-    setSaveLocalDialog(null);
+    try {
+      await saveSourceToLocalPath(normalizedPath);
+      setSaveLocalDialog(null);
+    } catch (error) {
+      setBlockingTask(null);
+      const message = error instanceof Error ? error.message : String(error);
+      pushToast(`Session save failed: ${message}`, "error");
+      console.error(`[app] Failed to save local session '${normalizedPath}': ${message}`);
+    }
   };
 
   const onSwitchIntegrator = (integratorId: string): void => {
@@ -2848,19 +3973,29 @@ export function App(): JSX.Element {
               activeEntryKey={selectedSystemKey}
               onSelect={onSwitchSystem}
               onDeleteLocal={onDeleteLocalSystem}
+              localPreviewUrlByPath={localSessionPreviewUrlsByPath}
             />
           </section>
         }
         bottom={
           <section className="section-block section-fill">
             <div className="section-header-row">
-              <h2>Definition</h2>
               <div className="section-actions">
-                <AppButton onClick={() => compileSystem(selectedSystemKey)}>
+                <AppButton onClick={() => compileSystem(selectedSystemKey)} disabled={isBlockingTaskActive}>
                   Build (F5)
                 </AppButton>
-                <AppButton variant="primary" onClick={onSaveOrUpdateSource} disabled={!hasSessionChanges}>
-                  {saveButtonLabel}
+                <AppButton
+                  variant="primary"
+                  onClick={onSaveAsNewSession}
+                  disabled={isBlockingTaskActive}
+                >
+                  Save as New Session
+                </AppButton>
+                <AppButton
+                  onClick={() => void onUpdateCurrentSession()}
+                  disabled={!canUpdateCurrentSession || isBlockingTaskActive}
+                >
+                  Update Session
                 </AppButton>
                 <div className="header-menu-anchor" ref={definitionActionsRef}>
                   <AppButton
@@ -2875,6 +4010,16 @@ export function App(): JSX.Element {
                   </AppButton>
                   {definitionActionsOpen ? (
                     <div className="header-menu-popup" role="menu" aria-label="Definition actions menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          void onDownloadSessionPng();
+                        }}
+                        disabled={parseResult === null || sessionPngExportInProgress || isBlockingTaskActive}
+                      >
+                        {sessionPngExportInProgress ? "Exporting Session PNG..." : "Download Session PNG"}
+                      </button>
                       <button type="button" role="menuitem" onClick={onBeautifySource}>
                         Beautify Definition
                       </button>
@@ -2913,10 +4058,13 @@ export function App(): JSX.Element {
         onFocusDistance={onFocusDistance}
         onStatus={setStatus}
         onError={onViewportError}
+        onGraphicsDiagnostics={setGraphicsDiagnostics}
         disableGlobalShortcuts={
           saveLocalDialog !== null ||
           deleteLocalDialogPath !== null ||
           pendingSwitchEntryKey !== null ||
+          sessionGalleryOpen ||
+          isBlockingTaskActive ||
           exportDialogState !== null ||
           helpDialogOpen
         }
@@ -3500,18 +4648,50 @@ export function App(): JSX.Element {
   );
 
   return (
-    <div className="app-root">
+    <div
+      className="app-root"
+      onDragEnter={onAppDragEnter}
+      onDragLeave={onAppDragLeave}
+      onDragOver={onAppDragOver}
+        onDrop={onAppDrop}
+    >
       <header className="topbar">
-        <div className="topbar-title">Fragmentarium Web</div>
+        <div className="topbar-left">
+          <div className="topbar-title">{APP_TITLE}</div>
+        </div>
+        <div className="topbar-center">
+          <AppButton
+            variant="primary"
+            className="topbar-gallery-button"
+            onClick={() => setSessionGalleryOpen(true)}
+            disabled={isBlockingTaskActive}
+          >
+            Session Gallery
+          </AppButton>
+        </div>
         <div className="topbar-actions">
-          <AppButton onClick={() => setHelpDialogOpen(true)}>
+          <AppButton onClick={() => setHelpDialogOpen(true)} disabled={isBlockingTaskActive}>
             Help...
           </AppButton>
-          <AppButton variant="primary" className="topbar-export-button" onClick={onOpenExportDialog}>
+          <AppButton
+            variant="primary"
+            className="topbar-export-button"
+            onClick={onOpenExportDialog}
+            disabled={isBlockingTaskActive}
+          >
             Export Render...
           </AppButton>
         </div>
       </header>
+
+      {dropImportOverlayVisible ? (
+        <div className="drop-import-overlay" role="presentation" aria-hidden="true">
+          <div className="drop-import-overlay-panel">
+            <div className="drop-import-overlay-title">Drop to Import</div>
+            <div className="drop-import-overlay-detail">Session PNG or Session Gallery ZIP</div>
+          </div>
+        </div>
+      ) : null}
 
       <SplitLayout
         leftWidth={leftPanePx}
@@ -3591,17 +4771,11 @@ export function App(): JSX.Element {
           })
         }
         onCancel={onCancelSaveLocalDialog}
-        onSave={onConfirmSaveLocalDialog}
-      />
-      <ConfirmDeleteLocalSystemDialog
-        open={deleteLocalDialogPath !== null}
-        localPath={deleteLocalDialogPath}
-        onCancel={() => setDeleteLocalDialogPath(null)}
-        onConfirm={onConfirmDeleteLocalSystem}
+        onSave={() => void onConfirmSaveLocalDialog()}
       />
       <ConfirmDiscardChangesDialog
-        open={pendingSwitchEntryKey !== null}
-        targetLabel={pendingSwitchTargetLabel}
+        open={pendingSwitchEntryKey !== null || pendingSessionPngImport !== null}
+        targetLabel={pendingDiscardTargetLabel}
         onCancel={onCancelDiscardSwitchDialog}
         onConfirm={onConfirmDiscardSwitchDialog}
       />
@@ -3693,9 +4867,37 @@ export function App(): JSX.Element {
           })
         }
       />
+      <SessionGalleryDialog
+        open={sessionGalleryOpen}
+        items={localSessionGalleryItems}
+        storageInfo={sessionGalleryStorageInfo}
+        isBusy={isBlockingTaskActive}
+        persistentStorageRequestInProgress={persistentStorageRequestInProgress}
+        onClose={() => setSessionGalleryOpen(false)}
+        onOpenSession={onOpenSessionFromGallery}
+        onDeleteSession={onDeleteSessionFromGallery}
+        onRenameSession={onRenameSessionFromGallery}
+        onRequestPersistentStorage={onRequestPersistentStorage}
+        onExportAll={() => void onExportAllSessionsZip()}
+        onImportZip={onImportSessionsZip}
+      />
+      <ConfirmDeleteLocalSystemDialog
+        open={deleteLocalDialogPath !== null}
+        localPath={deleteLocalDialogPath}
+        onCancel={() => setDeleteLocalDialogPath(null)}
+        onConfirm={() => void onConfirmDeleteLocalSystem()}
+      />
+      <BlockingTaskDialog
+        open={blockingTask !== null}
+        title={blockingTask?.title ?? "Working"}
+        message={blockingTask?.message ?? ""}
+        detail={blockingTask?.detail ?? null}
+        progress={blockingTask?.progress ?? null}
+      />
       <HelpDialog
         open={helpDialogOpen}
-        versionLabel={`v${packageJson.version}`}
+        versionLabel={APP_VERSION_LABEL}
+        graphicsDiagnostics={graphicsDiagnostics}
         onClose={() => setHelpDialogOpen(false)}
       />
     </div>

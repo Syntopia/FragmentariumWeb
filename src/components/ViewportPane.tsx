@@ -11,6 +11,7 @@ import type { IntegratorDefinition, IntegratorOptionValues } from "../core/integ
 import type { SourceLineRef, UniformDefinition, UniformValue } from "../core/parser/types";
 import {
   FragmentRenderer,
+  type RendererGraphicsDiagnostics,
   type RenderSettings,
   type SlicePlaneLockFrame,
   type RendererShaderErrorDetails,
@@ -31,6 +32,7 @@ interface ViewportPaneProps {
   onFocusDistance: (distance: number | null) => void;
   onStatus: (status: RendererStatus) => void;
   onError: (error: RendererShaderErrorDetails | string | null) => void;
+  onGraphicsDiagnostics?: (diagnostics: RendererGraphicsDiagnostics | null) => void;
   disableGlobalShortcuts?: boolean;
 }
 
@@ -80,19 +82,22 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
       });
       renderer.setRenderSettings(props.renderSettings);
       rendererRef.current = renderer;
+      props.onGraphicsDiagnostics?.(renderer.getGraphicsDiagnostics());
       renderer.start();
       props.onError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      props.onGraphicsDiagnostics?.(null);
       props.onError(message);
       return;
     }
 
     return () => {
+      props.onGraphicsDiagnostics?.(null);
       rendererRef.current?.destroy();
       rendererRef.current = null;
     };
-  }, [props.onError, props.onStatus]);
+  }, [props.onError, props.onGraphicsDiagnostics, props.onStatus]);
 
   useEffect(() => {
     const renderer = rendererRef.current;

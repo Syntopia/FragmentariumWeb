@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export interface SystemsTreeFolderNode {
   type: "folder";
@@ -22,6 +23,15 @@ interface SystemsTreeViewProps {
   activeEntryKey: string;
   onSelect: (entryKey: string) => void;
   onDeleteLocal: (localPath: string) => void;
+  localPreviewUrlByPath?: Record<string, string>;
+}
+
+interface HoverPreviewState {
+  localPath: string;
+  previewUrl: string;
+  label: string;
+  x: number;
+  y: number;
 }
 
 function collectFolderIds(nodes: SystemsTreeNode[], out: Set<string>): void {
@@ -42,6 +52,7 @@ export function SystemsTreeView(props: SystemsTreeViewProps): JSX.Element {
 
   const [openFolders, setOpenFolders] = useState<Set<string>>(initialOpenFolders);
   const knownFolderIdsRef = useRef<Set<string>>(initialOpenFolders);
+  const [hoverPreview, setHoverPreview] = useState<HoverPreviewState | null>(null);
 
   useEffect(() => {
     setOpenFolders((prev) => {
@@ -92,9 +103,30 @@ export function SystemsTreeView(props: SystemsTreeViewProps): JSX.Element {
 
     const isActive = props.activeEntryKey === node.entryKey;
     const hasDelete = node.localPath !== undefined;
+    const previewUrl = node.localPath !== undefined ? props.localPreviewUrlByPath?.[node.localPath] : undefined;
     return (
       <div key={node.id} className="systems-tree-node">
-        <div className="systems-tree-leaf-row" style={{ paddingLeft: `${depth * 14 + 4}px` }}>
+        <div
+          className="systems-tree-leaf-row"
+          style={{ paddingLeft: `${depth * 14 + 4}px` }}
+          onMouseLeave={() => {
+            if (node.localPath !== undefined) {
+              setHoverPreview((prev) => (prev?.localPath === node.localPath ? null : prev));
+            }
+          }}
+          onMouseMove={(event) => {
+            if (node.localPath === undefined || previewUrl === undefined) {
+              return;
+            }
+            setHoverPreview({
+              localPath: node.localPath,
+              previewUrl,
+              label: node.localPath,
+              x: event.clientX,
+              y: event.clientY
+            });
+          }}
+        >
           <button
             type="button"
             className={`systems-tree-leaf ${isActive ? "is-active" : ""}`}
@@ -121,5 +153,25 @@ export function SystemsTreeView(props: SystemsTreeViewProps): JSX.Element {
     );
   };
 
-  return <div className="systems-tree">{props.nodes.map((node) => renderNode(node, 0))}</div>;
+  return (
+    <div className="systems-tree" onMouseLeave={() => setHoverPreview(null)}>
+      {props.nodes.map((node) => renderNode(node, 0))}
+      {hoverPreview !== null && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="systems-tree-hover-preview"
+              style={{
+                left: `${Math.round(hoverPreview.x + 14)}px`,
+                top: `${Math.round(hoverPreview.y + 14)}px`
+              }}
+              role="presentation"
+            >
+              <img src={hoverPreview.previewUrl} alt={`Preview for ${hoverPreview.label}`} />
+              <div className="systems-tree-hover-preview-label">{hoverPreview.label}</div>
+            </div>,
+            document.body
+          )
+        : null}
+    </div>
+  );
 }

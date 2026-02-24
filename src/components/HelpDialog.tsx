@@ -1,8 +1,10 @@
 import { AppButton } from "./AppButton";
+import type { RendererGraphicsCapabilityStatus, RendererGraphicsDiagnostics } from "../core/render/renderer";
 
 interface HelpDialogProps {
   open: boolean;
   versionLabel: string;
+  graphicsDiagnostics: RendererGraphicsDiagnostics | null;
   onClose: () => void;
 }
 
@@ -75,7 +77,174 @@ export function HelpDialog(props: HelpDialogProps): JSX.Element | null {
             ))}
           </div>
         </div>
+
+        <div className="help-section">
+          <h4>Graphics Diagnostics</h4>
+          {props.graphicsDiagnostics === null ? (
+            <p className="muted">Graphics diagnostics unavailable (renderer not initialized).</p>
+          ) : (
+            <div className="help-diagnostics">
+              <DiagnosticsSummary diagnostics={props.graphicsDiagnostics} />
+              <DiagnosticsCapabilities capabilities={props.graphicsDiagnostics.capabilities} />
+              <DiagnosticsKeyValueList
+                title="Context"
+                rows={[
+                  ["WebGL", props.graphicsDiagnostics.webglVersion],
+                  ["GLSL", props.graphicsDiagnostics.shadingLanguageVersion],
+                  ["Vendor", props.graphicsDiagnostics.vendor],
+                  ["Renderer", props.graphicsDiagnostics.renderer],
+                  ["Unmasked Vendor", props.graphicsDiagnostics.unmaskedVendor ?? "Unavailable"],
+                  ["Unmasked Renderer", props.graphicsDiagnostics.unmaskedRenderer ?? "Unavailable"],
+                  ["ANGLE / Backend", props.graphicsDiagnostics.angleInfo ?? "Not detected"]
+                ]}
+              />
+              <DiagnosticsKeyValueList
+                title="Context Attributes"
+                rows={formatContextAttributeRows(props.graphicsDiagnostics)}
+              />
+              <DiagnosticsKeyValueList
+                title="Limits"
+                rows={[
+                  ["Max texture size", String(props.graphicsDiagnostics.limits.maxTextureSize)],
+                  ["Max renderbuffer size", String(props.graphicsDiagnostics.limits.maxRenderbufferSize)],
+                  [
+                    "Max viewport dims",
+                    `${props.graphicsDiagnostics.limits.maxViewportDims[0]} x ${props.graphicsDiagnostics.limits.maxViewportDims[1]}`
+                  ],
+                  ["Max color attachments", String(props.graphicsDiagnostics.limits.maxColorAttachments)],
+                  ["Max draw buffers", String(props.graphicsDiagnostics.limits.maxDrawBuffers)],
+                  ["Max texture image units", String(props.graphicsDiagnostics.limits.maxTextureImageUnits)],
+                  [
+                    "Max combined texture units",
+                    String(props.graphicsDiagnostics.limits.maxCombinedTextureImageUnits)
+                  ],
+                  [
+                    "Max fragment uniform vectors",
+                    String(props.graphicsDiagnostics.limits.maxFragmentUniformVectors)
+                  ],
+                  ["Max samples", String(props.graphicsDiagnostics.limits.maxSamples)]
+                ]}
+              />
+              <DiagnosticsKeyValueList
+                title="Extensions"
+                rows={[
+                  [
+                    "EXT_color_buffer_float",
+                    props.graphicsDiagnostics.extensions.extColorBufferFloat ? "Available" : "Missing"
+                  ],
+                  [
+                    "EXT_color_buffer_half_float",
+                    props.graphicsDiagnostics.extensions.extColorBufferHalfFloat ? "Available" : "Missing"
+                  ],
+                  [
+                    "WEBGL_debug_renderer_info",
+                    props.graphicsDiagnostics.extensions.webglDebugRendererInfo ? "Available" : "Missing"
+                  ],
+                  [
+                    "EXT_disjoint_timer_query_webgl2",
+                    props.graphicsDiagnostics.extensions.extDisjointTimerQueryWebgl2 ? "Available" : "Missing"
+                  ]
+                ]}
+              />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
+}
+
+interface DiagnosticsKeyValueListProps {
+  title: string;
+  rows: Array<[label: string, value: string]>;
+}
+
+function DiagnosticsKeyValueList(props: DiagnosticsKeyValueListProps): JSX.Element {
+  return (
+    <div className="help-diagnostics-block">
+      <div className="help-diagnostics-block-title">{props.title}</div>
+      <div className="help-diagnostics-list">
+        {props.rows.map(([label, value]) => (
+          <div key={label} className="help-diagnostics-row">
+            <span className="help-diagnostics-label">{label}</span>
+            <span className="help-diagnostics-value">{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DiagnosticsSummary({ diagnostics }: { diagnostics: RendererGraphicsDiagnostics }): JSX.Element {
+  const missingRequired = diagnostics.capabilities.filter((entry) => entry.required && !entry.available);
+  const warningClassName = missingRequired.length > 0 ? "help-diagnostics-banner warning" : "help-diagnostics-banner";
+  const message =
+    missingRequired.length > 0
+      ? `Missing required capability: ${missingRequired.map((entry) => entry.label).join(", ")}`
+      : "Required capabilities OK";
+  return <div className={warningClassName}>{message}</div>;
+}
+
+function DiagnosticsCapabilities({
+  capabilities
+}: {
+  capabilities: RendererGraphicsCapabilityStatus[];
+}): JSX.Element {
+  return (
+    <div className="help-diagnostics-block">
+      <div className="help-diagnostics-block-title">Capability Checks</div>
+      <div className="help-diagnostics-capability-list">
+        {capabilities.map((entry) => {
+          const statusClassName = entry.available ? "ok" : entry.required ? "error" : "muted";
+          return (
+            <div key={entry.label} className="help-diagnostics-capability-row">
+              <span className={`help-diagnostics-capability-status ${statusClassName}`}>
+                {entry.available ? "OK" : entry.required ? "Missing" : "Unavailable"}
+              </span>
+              <span className="help-diagnostics-capability-label">
+                {entry.label}
+                {entry.required ? " (required)" : ""}
+              </span>
+              {entry.detail ? <span className="help-diagnostics-capability-detail">{entry.detail}</span> : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatContextAttributeRows(diagnostics: RendererGraphicsDiagnostics): Array<[string, string]> {
+  if (diagnostics.contextAttributes === null) {
+    return [["Context attributes", "Unavailable"]];
+  }
+  const attrs = diagnostics.contextAttributes;
+  const rows: Array<[string, string]> = [
+    ["Alpha", formatBool(attrs.alpha)],
+    ["Antialias", formatBool(attrs.antialias)],
+    ["Depth", formatBool(attrs.depth)],
+    ["Stencil", formatBool(attrs.stencil)],
+    ["Preserve drawing buffer", formatBool(attrs.preserveDrawingBuffer)],
+    ["Premultiplied alpha", formatBool(attrs.premultipliedAlpha)]
+  ];
+  if (attrs.powerPreference !== undefined) {
+    rows.push(["Power preference", attrs.powerPreference]);
+  }
+  if (attrs.desynchronized !== undefined) {
+    rows.push(["Desynchronized", formatBool(attrs.desynchronized)]);
+  }
+  if (attrs.failIfMajorPerformanceCaveat !== undefined) {
+    rows.push(["Fail if perf caveat", formatBool(attrs.failIfMajorPerformanceCaveat)]);
+  }
+  if (attrs.xrCompatible !== undefined) {
+    rows.push(["XR compatible", formatBool(attrs.xrCompatible)]);
+  }
+  return rows;
+}
+
+function formatBool(value: boolean | undefined): string {
+  if (value === undefined) {
+    return "Unavailable";
+  }
+  return value ? "Yes" : "No";
 }

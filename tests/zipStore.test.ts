@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildZipStore } from "../src/utils/zipStore";
+import { buildZipStore, parseZipStore } from "../src/utils/zipStore";
 
 function readU16(data: Uint8Array, offset: number): number {
   return new DataView(data.buffer, data.byteOffset, data.byteLength).getUint16(offset, true);
@@ -44,5 +44,27 @@ describe("zipStore", () => {
         }
       ])
     ).toThrow();
+  });
+
+  test("parses zip entries built by buildZipStore", () => {
+    const sourceEntries = [
+      {
+        name: "sessions/foo/bar.png",
+        data: new Uint8Array([137, 80, 78, 71, 1, 2, 3]),
+        modifiedAt: new Date(2025, 1, 2, 3, 4, 6)
+      },
+      {
+        name: "sessions/baz.png",
+        data: new Uint8Array([9, 8, 7, 6, 5]),
+        modifiedAt: new Date(2025, 5, 7, 8, 9, 10)
+      }
+    ] as const;
+
+    const zip = buildZipStore(sourceEntries.map((entry) => ({ ...entry })));
+    const parsed = parseZipStore(zip);
+
+    expect(parsed.map((entry) => entry.name)).toEqual(sourceEntries.map((entry) => entry.name));
+    expect(parsed.map((entry) => [...entry.data])).toEqual(sourceEntries.map((entry) => [...entry.data]));
+    expect(parsed.every((entry) => entry.modifiedAt instanceof Date || entry.modifiedAt === null)).toBe(true);
   });
 });
