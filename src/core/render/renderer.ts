@@ -133,6 +133,9 @@ export interface RenderSettings {
   maxSubframes: number;
   tileCount: number;
   tilesPerFrame: number;
+  aspectRatioLocked: number;
+  aspectRatioX: number;
+  aspectRatioY: number;
   toneMapping: number;
   exposure: number;
   gamma: number;
@@ -146,6 +149,9 @@ export const DEFAULT_RENDER_SETTINGS: RenderSettings = {
   maxSubframes: 30,
   tileCount: 1,
   tilesPerFrame: 1,
+  aspectRatioLocked: 0,
+  aspectRatioX: 1,
+  aspectRatioY: 1,
   toneMapping: 4,
   exposure: 1,
   gamma: 2.2,
@@ -421,6 +427,9 @@ export class FragmentRenderer {
       maxSubframes: Math.max(0, Math.round(next.maxSubframes ?? this.renderSettings.maxSubframes)),
       tileCount: Math.max(1, Math.round(next.tileCount ?? this.renderSettings.tileCount)),
       tilesPerFrame: Math.max(1, Math.round(next.tilesPerFrame ?? this.renderSettings.tilesPerFrame)),
+      aspectRatioLocked: Math.max(0, Math.min(1, Math.round(next.aspectRatioLocked ?? this.renderSettings.aspectRatioLocked))),
+      aspectRatioX: Math.max(0.01, next.aspectRatioX ?? this.renderSettings.aspectRatioX),
+      aspectRatioY: Math.max(0.01, next.aspectRatioY ?? this.renderSettings.aspectRatioY),
       toneMapping: clamp(Math.round(next.toneMapping ?? this.renderSettings.toneMapping), 1, 4),
       exposure: clamp(next.exposure ?? this.renderSettings.exposure, 0, 8),
       gamma: clamp(next.gamma ?? this.renderSettings.gamma, 0.2, 5),
@@ -434,6 +443,9 @@ export class FragmentRenderer {
       updated.maxSubframes === this.renderSettings.maxSubframes &&
       updated.tileCount === this.renderSettings.tileCount &&
       updated.tilesPerFrame === this.renderSettings.tilesPerFrame &&
+      updated.aspectRatioLocked === this.renderSettings.aspectRatioLocked &&
+      Math.abs(updated.aspectRatioX - this.renderSettings.aspectRatioX) < 1e-9 &&
+      Math.abs(updated.aspectRatioY - this.renderSettings.aspectRatioY) < 1e-9 &&
       updated.toneMapping === this.renderSettings.toneMapping &&
       updated.exposure === this.renderSettings.exposure &&
       updated.gamma === this.renderSettings.gamma &&

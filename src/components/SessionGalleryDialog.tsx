@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { AppButton } from "./AppButton";
+import { DEFAULT_GITHUB_SESSION_GALLERY_SOURCE_URL } from "../app/sessionGalleryDefaults";
 
 export const LOCAL_SESSION_GALLERY_ROOT_LABEL = "Local Sessions";
 
@@ -81,8 +82,6 @@ const GALLERY_SPLITTER_WIDTH_PX = 10;
 const MIN_GALLERY_DIALOG_WIDTH_PX = 680;
 const MIN_GALLERY_DIALOG_HEIGHT_PX = 460;
 const GALLERY_DIALOG_VIEWPORT_MARGIN_PX = 24;
-const DEFAULT_EXTERNAL_GITHUB_SOURCE_URL =
-  "https://github.com/Syntopia/FragmentariumWeb/tree/main/factory%20sessions/sessions";
 type SessionGalleryTileSortMode = "name" | "date";
 
 function buildFolderTree(items: SessionGalleryItem[], externalSources: SessionGalleryExternalSource[]): GalleryFolderNode {
@@ -955,7 +954,7 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
               <AppButton
                 className="session-gallery-sidebar-add-source-button"
                 onClick={() => {
-                  setExternalUrlInput(DEFAULT_EXTERNAL_GITHUB_SOURCE_URL);
+                  setExternalUrlInput(DEFAULT_GITHUB_SESSION_GALLERY_SOURCE_URL);
                   setExternalAddDialogOpen(true);
                   setExternalUrlError(null);
                 }}
@@ -995,7 +994,9 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
                         disabled={props.isBusy}
                         title={buildSessionGalleryTileTitle(item)}
                       >
-                        <img src={item.previewUrl} alt={`Preview for ${item.path}`} loading="lazy" />
+                        <span className="session-gallery-tile-preview" aria-hidden="true">
+                          <img src={item.previewUrl} alt="" loading="lazy" />
+                        </span>
                         <span className="session-gallery-tile-label">{item.tileLabel ?? item.path}</span>
                       </button>
                     );

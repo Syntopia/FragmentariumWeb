@@ -26,6 +26,7 @@ describe("integrators", () => {
     expect(quality.options.some((option) => option.key === "metalness")).toBe(true);
     expect(quality.options.some((option) => option.key === "roughness")).toBe(true);
     expect(quality.options.some((option) => option.key === "useOrbitTrap")).toBe(true);
+    expect(quality.options.some((option) => option.key === "orbitTrapPaletteIndex")).toBe(true);
     expect(quality.options.some((option) => option.key === "diffuseColorR")).toBe(true);
     expect(quality.options.some((option) => option.key === "slicePlaneEnabled")).toBe(true);
     expect(quality.options.some((option) => option.key === "slicePlaneDistance")).toBe(true);
@@ -37,6 +38,7 @@ describe("integrators", () => {
     expect(qualityDefaults.metalness).toBe(0.05);
     expect(qualityDefaults.roughness).toBe(0.35);
     expect(qualityDefaults.orbitTrapFalloff).toBe(5.5);
+    expect(qualityDefaults.orbitTrapPaletteIndex).toBe(0);
     expect(qualityDefaults.orbitTrapHueOffset).toBe(0);
     expect(qualityDefaults.orbitTrapHueScale).toBe(1);
     expect(qualityDefaults.orbitTrapSaturation).toBe(1);
@@ -64,6 +66,7 @@ describe("integrators", () => {
     expect(integrator.options.some((option) => option.key === "diffuseColorR")).toBe(true);
     expect(integrator.options.some((option) => option.key === "useOrbitTrap")).toBe(true);
     expect(integrator.options.some((option) => option.key === "orbitTrapFalloff")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "orbitTrapPaletteIndex")).toBe(true);
     expect(integrator.options.some((option) => option.key === "orbitTrapHueOffset")).toBe(true);
     expect(integrator.options.some((option) => option.key === "orbitTrapHueScale")).toBe(true);
     expect(integrator.options.some((option) => option.key === "orbitTrapSaturation")).toBe(true);
@@ -96,6 +99,7 @@ describe("integrators", () => {
     expect(defaults.sampleClamp).toBe(3);
     expect(defaults.useOrbitTrap).toBe(1);
     expect(defaults.orbitTrapFalloff).toBe(5.5);
+    expect(defaults.orbitTrapPaletteIndex).toBe(0);
     expect(defaults.orbitTrapHueOffset).toBe(0);
     expect(defaults.orbitTrapHueScale).toBe(1);
     expect(defaults.orbitTrapSaturation).toBe(1);
@@ -147,6 +151,7 @@ describe("integrators", () => {
         diffuseColorG: 0.2,
         diffuseColorB: 0.3,
         orbitTrapFalloff: 9.5,
+        orbitTrapPaletteIndex: 6,
         orbitTrapHueScale: 2.75,
         useOrbitTrap: 0,
         focalDistance: 12,
@@ -165,6 +170,7 @@ describe("integrators", () => {
     expect(transferred.diffuseColorG).toBe(0.2);
     expect(transferred.diffuseColorB).toBe(0.3);
     expect(transferred.orbitTrapFalloff).toBe(9.5);
+    expect(transferred.orbitTrapPaletteIndex).toBe(6);
     expect(transferred.orbitTrapHueScale).toBe(2.75);
     expect(transferred.useOrbitTrap).toBe(0);
     expect(transferred.focalDistance).toBe(12);

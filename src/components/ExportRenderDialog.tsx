@@ -70,6 +70,47 @@ function clampFloat(value: number, min: number): number {
   return Math.max(min, value);
 }
 
+function formatDecimalRatioLabel(ratio: number): string {
+  const fixed = ratio.toFixed(3).replace(/\.?0+$/, "");
+  return `${fixed}:1`;
+}
+
+function formatAspectRatioLabel(ratio: number): string {
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return "n/a";
+  }
+
+  let bestNumerator = 1;
+  let bestDenominator = 1;
+  let bestError = Number.POSITIVE_INFINITY;
+  for (let denominator = 1; denominator <= 128; denominator += 1) {
+    const numerator = Math.max(1, Math.round(ratio * denominator));
+    const candidate = numerator / denominator;
+    const error = Math.abs(candidate - ratio);
+    if (error < bestError) {
+      bestError = error;
+      bestNumerator = numerator;
+      bestDenominator = denominator;
+      if (error <= 1.0e-10) {
+        break;
+      }
+    }
+  }
+
+  const relativeError = bestError / Math.max(ratio, 1.0e-6);
+  if (relativeError <= 1.0e-4) {
+    if (bestDenominator === 1) {
+      return `${bestNumerator}:1`;
+    }
+    if (bestDenominator === 10 || bestDenominator === 100 || bestDenominator === 1000) {
+      return formatDecimalRatioLabel(bestNumerator / bestDenominator);
+    }
+    return `${bestNumerator}:${bestDenominator}`;
+  }
+
+  return formatDecimalRatioLabel(ratio);
+}
+
 export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element | null {
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const dragStateRef = useRef<{
@@ -102,9 +143,7 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
   const movieConfigInvalid =
     props.movieFps <= 0 || props.movieBitrateMbps <= 0 || props.movieKeyframeInterval <= 0;
   const movieButtonDisabled = movieExportDisabled || !props.movieSupported || movieConfigInvalid;
-  const aspectRatioLabel = Number.isFinite(props.aspectRatio) && props.aspectRatio > 0
-    ? `${props.aspectRatio.toFixed(3)}:1`
-    : "n/a";
+  const aspectRatioLabel = formatAspectRatioLabel(props.aspectRatio);
 
   return (
     <div className="modal-backdrop">
@@ -218,7 +257,7 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
           <label className="modal-field">
             <span className="uniform-label">Aspect</span>
             <div className="uniform-bool export-aspect-lock">
-              <span>{props.aspectRatioLocked ? `Locked (${aspectRatioLabel})` : "Unlocked"}</span>
+              <span>{props.aspectRatioLocked ? `Locked ${aspectRatioLabel}` : "Unlocked"}</span>
               <input
                 type="checkbox"
                 checked={props.aspectRatioLocked}

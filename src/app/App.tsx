@@ -24,6 +24,7 @@ import { UniformPanel } from "../components/UniformPanel";
 import { VerticalSplitLayout } from "../components/VerticalSplitLayout";
 import { VerticalTabList, type VerticalTabItem } from "../components/VerticalTabList";
 import { ViewportPane } from "../components/ViewportPane";
+import { DEFAULT_GITHUB_SESSION_GALLERY_SOURCE_URL } from "./sessionGalleryDefaults";
 import { type CameraState } from "../core/geometry/camera";
 import {
   INTEGRATORS,
@@ -122,9 +123,15 @@ const LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES = 15;
 const SESSION_PNG_PREVIEW_WIDTH = 500;
 const SESSION_PNG_PREVIEW_SUBFRAMES = 30;
 const SESSION_GALLERY_ZIP_ROOT = "sessions";
-const DEFAULT_GITHUB_SESSION_GALLERY_SOURCE_URL =
-  "https://github.com/Syntopia/FragmentariumWeb/tree/main/factory%20sessions/sessions";
 const SESSION_GALLERY_GITHUB_ROOT_LABEL = "GitHub";
+const RENDER_ASPECT_RATIO_PRESETS = [
+  { id: "16:9", x: 16, y: 9, label: "16:9 (Widescreen)" },
+  { id: "9:16", x: 9, y: 16, label: "9:16 (Portrait)" },
+  { id: "1:1", x: 1, y: 1, label: "1:1 (Square)" },
+  { id: "4:3", x: 4, y: 3, label: "4:3 (Standard)" },
+  { id: "4:5", x: 4, y: 5, label: "4:5 (Vertical)" },
+  { id: "2.39:1", x: 2.39, y: 1, label: "2.39:1 (Cinema)" }
+] as const;
 const APP_VERSION_LABEL = `v${buildVersion.version}`;
 const APP_BUILD_DATE_LABEL = buildVersion.buildDate;
 const APP_TITLE = `Fragmentarium Web ${APP_VERSION_LABEL} (${APP_BUILD_DATE_LABEL})`;
@@ -848,6 +855,8 @@ function normalizeIntegratorOptionsById(
 
 function coerceRenderSettings(candidate: Partial<RenderSettings> | undefined): RenderSettings {
   const source = candidate ?? {};
+  const aspectRatioX = clamp(source.aspectRatioX ?? DEFAULT_RENDER_SETTINGS.aspectRatioX, 0.01, 100000);
+  const aspectRatioY = clamp(source.aspectRatioY ?? DEFAULT_RENDER_SETTINGS.aspectRatioY, 0.01, 100000);
   return {
     interactionResolutionScale: clamp(
       source.interactionResolutionScale ?? DEFAULT_RENDER_SETTINGS.interactionResolutionScale,
@@ -857,12 +866,33 @@ function coerceRenderSettings(candidate: Partial<RenderSettings> | undefined): R
     maxSubframes: Math.max(0, Math.round(source.maxSubframes ?? DEFAULT_RENDER_SETTINGS.maxSubframes)),
     tileCount: Math.max(1, Math.round(source.tileCount ?? DEFAULT_RENDER_SETTINGS.tileCount)),
     tilesPerFrame: Math.max(1, Math.round(source.tilesPerFrame ?? DEFAULT_RENDER_SETTINGS.tilesPerFrame)),
+    aspectRatioLocked: Math.round(clamp(source.aspectRatioLocked ?? DEFAULT_RENDER_SETTINGS.aspectRatioLocked, 0, 1)),
+    aspectRatioX,
+    aspectRatioY,
     toneMapping: Math.round(clamp(source.toneMapping ?? DEFAULT_RENDER_SETTINGS.toneMapping, 1, 4)),
     exposure: clamp(source.exposure ?? DEFAULT_RENDER_SETTINGS.exposure, 0, 8),
     gamma: clamp(source.gamma ?? DEFAULT_RENDER_SETTINGS.gamma, 0.2, 5),
     brightness: clamp(source.brightness ?? DEFAULT_RENDER_SETTINGS.brightness, 0, 5),
     contrast: clamp(source.contrast ?? DEFAULT_RENDER_SETTINGS.contrast, 0, 5),
     saturation: clamp(source.saturation ?? DEFAULT_RENDER_SETTINGS.saturation, 0, 5)
+  };
+}
+
+function computeAspectRatioValue(x: number, y: number): number | null {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0) {
+    return null;
+  }
+  return x / y;
+}
+
+function estimateViewportPixelsFromStatus(status: RendererStatus): { width: number; height: number } | null {
+  if (status.resolution[0] <= 0 || status.resolution[1] <= 0) {
+    return null;
+  }
+  const scale = Number.isFinite(status.scale) && status.scale > 1e-6 ? status.scale : 1;
+  return {
+    width: Math.max(1, Math.round(status.resolution[0] / scale)),
+    height: Math.max(1, Math.round(status.resolution[1] / scale))
   };
 }
 
@@ -1137,6 +1167,25 @@ export function App(): JSX.Element {
     }
     return [...groups.entries()].map(([group, options]) => ({ group, options }));
   }, [activeIntegrator]);
+
+  const viewportAspectEstimate = useMemo(
+    () => estimateViewportPixelsFromStatus(status),
+    [status]
+  );
+  const renderAspectRatioLocked = renderSettings.aspectRatioLocked >= 0.5;
+  const selectedRenderAspectPresetId = useMemo(() => {
+    const ratio = computeAspectRatioValue(renderSettings.aspectRatioX, renderSettings.aspectRatioY);
+    if (ratio === null) {
+      return "custom";
+    }
+    for (const preset of RENDER_ASPECT_RATIO_PRESETS) {
+      const presetRatio = preset.x / preset.y;
+      if (Math.abs(ratio - presetRatio) <= 1e-4) {
+        return preset.id;
+      }
+    }
+    return "custom";
+  }, [renderSettings.aspectRatioX, renderSettings.aspectRatioY]);
 
   const uniformValues = parseResult
     ? uniformValuesBySystem[selectedSystemKey] ?? getDefaultUniformValues(parseResult.uniforms)
@@ -2280,6 +2329,81 @@ export function App(): JSX.Element {
     setRenderSettings((prev) => coerceRenderSettings({ ...prev, [key]: value }));
   };
 
+  useEffect(() => {
+    if (renderSettings.aspectRatioLocked >= 0.5) {
+      return;
+    }
+    if (viewportAspectEstimate === null) {
+      return;
+    }
+    setRenderSettings((prev) => {
+      if (prev.aspectRatioLocked >= 0.5) {
+        return prev;
+      }
+      if (prev.aspectRatioX === viewportAspectEstimate.width && prev.aspectRatioY === viewportAspectEstimate.height) {
+        return prev;
+      }
+      return {
+        ...prev,
+        aspectRatioX: viewportAspectEstimate.width,
+        aspectRatioY: viewportAspectEstimate.height
+      };
+    });
+  }, [renderSettings.aspectRatioLocked, viewportAspectEstimate]);
+
+  const onRenderAspectRatioLockChange = (locked: boolean): void => {
+    setRenderSettings((prev) => {
+      if (locked) {
+        const sync = viewportAspectEstimate;
+        const nextX =
+          sync !== null && prev.aspectRatioLocked < 0.5 ? sync.width : prev.aspectRatioX;
+        const nextY =
+          sync !== null && prev.aspectRatioLocked < 0.5 ? sync.height : prev.aspectRatioY;
+        return coerceRenderSettings({
+          ...prev,
+          aspectRatioLocked: 1,
+          aspectRatioX: nextX,
+          aspectRatioY: nextY
+        });
+      }
+      return coerceRenderSettings({
+        ...prev,
+        aspectRatioLocked: 0
+      });
+    });
+  };
+
+  const onRenderAspectRatioPartChange = (key: "aspectRatioX" | "aspectRatioY", value: number): void => {
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    setRenderSettings((prev) =>
+      coerceRenderSettings({
+        ...prev,
+        [key]: value,
+        aspectRatioLocked: 1
+      })
+    );
+  };
+
+  const onRenderAspectRatioPresetChange = (presetId: string): void => {
+    if (presetId === "custom") {
+      return;
+    }
+    const preset = RENDER_ASPECT_RATIO_PRESETS.find((entry) => entry.id === presetId);
+    if (preset === undefined) {
+      return;
+    }
+    setRenderSettings((prev) =>
+      coerceRenderSettings({
+        ...prev,
+        aspectRatioLocked: 1,
+        aspectRatioX: preset.x,
+        aspectRatioY: preset.y
+      })
+    );
+  };
+
   const onResetActiveIntegratorOptions = (): void => {
     setIntegratorOptionsById((prev) => ({
       ...prev,
@@ -2382,13 +2506,20 @@ export function App(): JSX.Element {
       status.resolution[0] > 1 && status.scale > 0.01 ? Math.round(status.resolution[0] / status.scale) : 1920;
     const estimatedHeight =
       status.resolution[1] > 1 && status.scale > 0.01 ? Math.round(status.resolution[1] / status.scale) : 1080;
+    const renderAspectRatio = computeAspectRatioValue(renderSettings.aspectRatioX, renderSettings.aspectRatioY);
+    const exportAspectRatio =
+      renderSettings.aspectRatioLocked >= 0.5 && renderAspectRatio !== null
+        ? renderAspectRatio
+        : Math.max(1, estimatedWidth) / Math.max(1, estimatedHeight);
+    const exportWidth = Math.max(1, estimatedWidth);
+    const exportHeight = Math.max(1, estimatedHeight);
 
     setExportDialogState({
       mode: "still",
-      width: Math.max(1, estimatedWidth),
-      height: Math.max(1, estimatedHeight),
+      width: exportWidth,
+      height: exportHeight,
       aspectRatioLocked: true,
-      aspectRatio: Math.max(1, estimatedWidth) / Math.max(1, estimatedHeight),
+      aspectRatio: exportAspectRatio,
       subframes: renderSettings.maxSubframes > 0 ? renderSettings.maxSubframes : 30,
       frameCount: 100,
       startPresetName,
@@ -4647,6 +4778,56 @@ export function App(): JSX.Element {
                       step={1}
                       value={renderSettings.tilesPerFrame}
                       onChange={(event) => onRenderSettingChange("tilesPerFrame", Number(event.target.value))}
+                    />
+                  </div>
+                </div>
+
+                <div className="uniform-row">
+                  <span className="uniform-label">Aspect Preset</span>
+                  <div className="uniform-inputs render-aspect-preset-inputs">
+                    <select
+                      value={renderAspectRatioLocked ? selectedRenderAspectPresetId : "custom"}
+                      onChange={(event) => onRenderAspectRatioPresetChange(event.target.value)}
+                    >
+                      <option value="custom">Custom / Viewport</option>
+                      {RENDER_ASPECT_RATIO_PRESETS.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+                    <label className="uniform-bool render-aspect-lock-toggle">
+                      <span>Lock</span>
+                      <input
+                        type="checkbox"
+                        checked={renderAspectRatioLocked}
+                        onChange={(event) => onRenderAspectRatioLockChange(event.target.checked)}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="uniform-row">
+                  <span className="uniform-label">Aspect Ratio</span>
+                  <div className="uniform-inputs render-aspect-ratio-inputs">
+                    <input
+                      className="uniform-number"
+                      type="number"
+                      min={0.01}
+                      max={100000}
+                      step={0.01}
+                      value={renderSettings.aspectRatioX}
+                      onChange={(event) => onRenderAspectRatioPartChange("aspectRatioX", event.target.valueAsNumber)}
+                    />
+                    <span className="render-aspect-ratio-sep" aria-hidden="true">:</span>
+                    <input
+                      className="uniform-number"
+                      type="number"
+                      min={0.01}
+                      max={100000}
+                      step={0.01}
+                      value={renderSettings.aspectRatioY}
+                      onChange={(event) => onRenderAspectRatioPartChange("aspectRatioY", event.target.valueAsNumber)}
                     />
                   </div>
                 </div>

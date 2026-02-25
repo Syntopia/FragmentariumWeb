@@ -222,6 +222,7 @@ uniform float uIntegrator_diffuseColorR;
 uniform float uIntegrator_diffuseColorG;
 uniform float uIntegrator_diffuseColorB;
 uniform int uIntegrator_useOrbitTrap;
+uniform int uIntegrator_orbitTrapPaletteIndex;
 uniform float uIntegrator_orbitTrapFalloff;
 uniform float uIntegrator_orbitTrapHueOffset;
 uniform float uIntegrator_orbitTrapHueScale;
@@ -359,15 +360,69 @@ vec3 hsv2rgb(vec3 c) {
   return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
 }
 
+vec3 fragmentariumWebOrbitTrapIqPalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
+  const float TAU = 6.28318530718;
+  return a + b * cos(TAU * (c * t + d));
+}
+
+vec3 fragmentariumWebOrbitTrapPaletteColor(float t, int paletteIndex) {
+  if (paletteIndex == 1) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.33, 0.67)
+    );
+  }
+  if (paletteIndex == 2) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.10, 0.20)
+    );
+  }
+  if (paletteIndex == 3) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.30, 0.20, 0.20)
+    );
+  }
+  if (paletteIndex == 4) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(1.0, 1.0, 0.5), vec3(0.80, 0.90, 0.30)
+    );
+  }
+  if (paletteIndex == 5) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(1.0, 0.7, 0.4), vec3(0.0, 0.15, 0.20)
+    );
+  }
+  if (paletteIndex == 6) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(2.0, 1.0, 0.0), vec3(0.50, 0.20, 0.25)
+    );
+  }
+  if (paletteIndex == 7) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.8, 0.5, 0.4), vec3(0.2, 0.4, 0.2), vec3(2.0, 1.0, 1.0), vec3(0.0, 0.25, 0.25)
+    );
+  }
+  return vec3(1.0);
+}
+
 vec3 applyOrbitTrapHueBlend(vec3 baseColor) {
   if (uIntegrator_useOrbitTrap <= 0) {
     return baseColor;
   }
   float trapVal = fragmentariumWebOrbitTrapValue(uIntegrator_orbitTrapFalloff);
-  float hue = fract(uIntegrator_orbitTrapHueOffset + trapVal * uIntegrator_orbitTrapHueScale);
+  float phase = uIntegrator_orbitTrapHueOffset + trapVal * uIntegrator_orbitTrapHueScale;
   float saturation = clamp(uIntegrator_orbitTrapSaturation, 0.0, 1.0);
   float value = max(uIntegrator_orbitTrapValue, 0.0);
-  vec3 trapHue = hsv2rgb(vec3(hue, saturation, value));
+  int paletteIndex = clamp(uIntegrator_orbitTrapPaletteIndex, 0, 7);
+  vec3 trapHue;
+  if (paletteIndex <= 0) {
+    float hue = fract(phase);
+    trapHue = hsv2rgb(vec3(hue, saturation, value));
+  } else {
+    trapHue = fragmentariumWebOrbitTrapPaletteColor(phase, paletteIndex);
+    float luma = dot(trapHue, vec3(0.2126, 0.7152, 0.0722));
+    trapHue = mix(vec3(luma), trapHue, saturation);
+    trapHue *= (1.0 + value);
+  }
   float mixAmount = clamp(trapVal * clamp(uIntegrator_orbitTrapMix, 0.0, 1.0), 0.0, 1.0);
   return mix(baseColor, trapHue, mixAmount);
 }
@@ -497,6 +552,7 @@ const deQualityOptionTemplate: IntegratorOptionDefinition[] = [
   { key: "diffuseColorG", label: "Diffuse G", min: 0, max: 1, defaultValue: 0.82, step: 0.01 },
   { key: "diffuseColorB", label: "Diffuse B", min: 0, max: 1, defaultValue: 0.72, step: 0.01 },
   { key: "useOrbitTrap", label: "Use Orbit Trap", min: 0, max: 1, defaultValue: 1, step: 1 },
+  { key: "orbitTrapPaletteIndex", label: "Trap Palette", min: 0, max: 7, defaultValue: 0, step: 1 },
   { key: "orbitTrapFalloff", label: "Trap Falloff", min: 0.1, max: 24, defaultValue: 5.5, step: 0.01 },
   { key: "orbitTrapHueOffset", label: "Trap Hue Shift", min: -1, max: 1, defaultValue: 0, step: 0.01 },
   { key: "orbitTrapHueScale", label: "Trap Hue Scale", min: -8, max: 8, defaultValue: 1, step: 0.01 },
@@ -533,6 +589,7 @@ uniform float uIntegrator_diffuseColorR;
 uniform float uIntegrator_diffuseColorG;
 uniform float uIntegrator_diffuseColorB;
 uniform int uIntegrator_useOrbitTrap;
+uniform int uIntegrator_orbitTrapPaletteIndex;
 uniform float uIntegrator_orbitTrapFalloff;
 uniform float uIntegrator_orbitTrapHueOffset;
 uniform float uIntegrator_orbitTrapHueScale;
@@ -689,15 +746,69 @@ vec3 hsv2rgb(vec3 c) {
   return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
 }
 
+vec3 fragmentariumWebOrbitTrapIqPalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
+  const float TAU = 6.28318530718;
+  return a + b * cos(TAU * (c * t + d));
+}
+
+vec3 fragmentariumWebOrbitTrapPaletteColor(float t, int paletteIndex) {
+  if (paletteIndex == 1) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.33, 0.67)
+    );
+  }
+  if (paletteIndex == 2) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.10, 0.20)
+    );
+  }
+  if (paletteIndex == 3) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.30, 0.20, 0.20)
+    );
+  }
+  if (paletteIndex == 4) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(1.0, 1.0, 0.5), vec3(0.80, 0.90, 0.30)
+    );
+  }
+  if (paletteIndex == 5) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(1.0, 0.7, 0.4), vec3(0.0, 0.15, 0.20)
+    );
+  }
+  if (paletteIndex == 6) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.5), vec3(0.5), vec3(2.0, 1.0, 0.0), vec3(0.50, 0.20, 0.25)
+    );
+  }
+  if (paletteIndex == 7) {
+    return fragmentariumWebOrbitTrapIqPalette(
+      t, vec3(0.8, 0.5, 0.4), vec3(0.2, 0.4, 0.2), vec3(2.0, 1.0, 1.0), vec3(0.0, 0.25, 0.25)
+    );
+  }
+  return vec3(1.0);
+}
+
 vec3 applyOrbitTrapHueBlendPT(vec3 baseColor) {
   if (uIntegrator_useOrbitTrap <= 0) {
     return baseColor;
   }
   float trapVal = fragmentariumWebOrbitTrapValue(uIntegrator_orbitTrapFalloff);
-  float hue = fract(uIntegrator_orbitTrapHueOffset + trapVal * uIntegrator_orbitTrapHueScale);
+  float phase = uIntegrator_orbitTrapHueOffset + trapVal * uIntegrator_orbitTrapHueScale;
   float saturation = clamp(uIntegrator_orbitTrapSaturation, 0.0, 1.0);
   float value = max(uIntegrator_orbitTrapValue, 0.0);
-  vec3 trapHue = hsv2rgb(vec3(hue, saturation, value));
+  int paletteIndex = clamp(uIntegrator_orbitTrapPaletteIndex, 0, 7);
+  vec3 trapHue;
+  if (paletteIndex <= 0) {
+    float hue = fract(phase);
+    trapHue = hsv2rgb(vec3(hue, saturation, value));
+  } else {
+    trapHue = fragmentariumWebOrbitTrapPaletteColor(phase, paletteIndex);
+    float luma = dot(trapHue, vec3(0.2126, 0.7152, 0.0722));
+    trapHue = mix(vec3(luma), trapHue, saturation);
+    trapHue *= (1.0 + value);
+  }
   float mixAmount = clamp(trapVal * clamp(uIntegrator_orbitTrapMix, 0.0, 1.0), 0.0, 1.0);
   return mix(baseColor, trapHue, mixAmount);
 }
@@ -1349,6 +1460,7 @@ export const INTEGRATORS: IntegratorDefinition[] = [
       { key: "diffuseColorG", label: "Diffuse G", min: 0, max: 1, defaultValue: 0.82, step: 0.01 },
       { key: "diffuseColorB", label: "Diffuse B", min: 0, max: 1, defaultValue: 0.72, step: 0.01 },
       { key: "useOrbitTrap", label: "Use Orbit Trap", min: 0, max: 1, defaultValue: 1, step: 1 },
+      { key: "orbitTrapPaletteIndex", label: "Trap Palette", min: 0, max: 7, defaultValue: 0, step: 1 },
       { key: "orbitTrapFalloff", label: "Trap Falloff", min: 0.1, max: 24, defaultValue: 5.5, step: 0.01 },
       { key: "orbitTrapHueOffset", label: "Trap Hue Shift", min: -1, max: 1, defaultValue: 0, step: 0.01 },
       { key: "orbitTrapHueScale", label: "Trap Hue Scale", min: -8, max: 8, defaultValue: 1, step: 0.01 },

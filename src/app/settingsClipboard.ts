@@ -1,6 +1,7 @@
 import { getDefaultIntegratorOptions, getIntegratorById } from "../core/integrators/definitions";
 import type { IntegratorOptionValues } from "../core/integrators/types";
 import type { UniformValue } from "../core/parser/types";
+import { DEFAULT_RENDER_SETTINGS } from "../core/render/renderer";
 import type { RenderSettings, SlicePlaneLockFrame } from "../core/render/renderer";
 import type { CameraState } from "../core/geometry/camera";
 
@@ -160,11 +161,27 @@ function asRenderSettings(value: unknown): RenderSettings {
     throw new Error("Invalid 'renderSettings' value in clipboard payload.");
   }
 
+  const aspectRatioLocked =
+    value.aspectRatioLocked === undefined
+      ? DEFAULT_RENDER_SETTINGS.aspectRatioLocked
+      : asFiniteNumber(value.aspectRatioLocked, "renderSettings.aspectRatioLocked");
+  const aspectRatioX =
+    value.aspectRatioX === undefined
+      ? DEFAULT_RENDER_SETTINGS.aspectRatioX
+      : asFiniteNumber(value.aspectRatioX, "renderSettings.aspectRatioX");
+  const aspectRatioY =
+    value.aspectRatioY === undefined
+      ? DEFAULT_RENDER_SETTINGS.aspectRatioY
+      : asFiniteNumber(value.aspectRatioY, "renderSettings.aspectRatioY");
+
   return {
     interactionResolutionScale: asFiniteNumber(value.interactionResolutionScale, "renderSettings.interactionResolutionScale"),
     maxSubframes: asFiniteNumber(value.maxSubframes, "renderSettings.maxSubframes"),
     tileCount: asFiniteNumber(value.tileCount, "renderSettings.tileCount"),
     tilesPerFrame: asFiniteNumber(value.tilesPerFrame, "renderSettings.tilesPerFrame"),
+    aspectRatioLocked,
+    aspectRatioX,
+    aspectRatioY,
     toneMapping: asFiniteNumber(value.toneMapping, "renderSettings.toneMapping"),
     exposure: asFiniteNumber(value.exposure, "renderSettings.exposure"),
     gamma: asFiniteNumber(value.gamma, "renderSettings.gamma"),

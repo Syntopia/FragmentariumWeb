@@ -7,7 +7,10 @@ const RENDER_GROUP_KEYS: ReadonlyArray<keyof RenderSettings> = [
   "interactionResolutionScale",
   "maxSubframes",
   "tileCount",
-  "tilesPerFrame"
+  "tilesPerFrame",
+  "aspectRatioLocked",
+  "aspectRatioX",
+  "aspectRatioY"
 ];
 
 const POST_GROUP_KEYS: ReadonlyArray<keyof RenderSettings> = [

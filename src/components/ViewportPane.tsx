@@ -1,5 +1,7 @@
 import {
   useCallback,
+  useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
   useEffect,
@@ -38,6 +40,79 @@ interface ViewportPaneProps {
 
 const movementKeys = new Set(["w", "a", "s", "d", "q", "e", "r", "c", "y", "h", "g", "j"]);
 
+interface ViewportCanvasLayout {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+function computeGcd(a: number, b: number): number {
+  let x = Math.abs(Math.trunc(a));
+  let y = Math.abs(Math.trunc(b));
+  while (y !== 0) {
+    const next = x % y;
+    x = y;
+    y = next;
+  }
+  return Math.max(1, x);
+}
+
+function formatAspectRatioPart(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "?";
+  }
+  const rounded = Math.round(value);
+  if (Math.abs(value - rounded) < 1.0e-4) {
+    return `${rounded}`;
+  }
+  const fixed = value.toFixed(3);
+  return fixed.replace(/\.?0+$/, "");
+}
+
+function formatAspectRatioLabel(renderSettings: RenderSettings): string | null {
+  if (renderSettings.aspectRatioLocked < 0.5) {
+    return null;
+  }
+  const x = renderSettings.aspectRatioX;
+  const y = renderSettings.aspectRatioY;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0) {
+    return null;
+  }
+
+  const roundedX = Math.round(x);
+  const roundedY = Math.round(y);
+  if (Math.abs(x - roundedX) < 1.0e-4 && Math.abs(y - roundedY) < 1.0e-4) {
+    const gcd = computeGcd(roundedX, roundedY);
+    return `${Math.round(roundedX / gcd)}:${Math.round(roundedY / gcd)}`;
+  }
+
+  return `${formatAspectRatioPart(x)}:${formatAspectRatioPart(y)}`;
+}
+
+function resolveViewportCanvasLayout(width: number, height: number, renderSettings: RenderSettings): ViewportCanvasLayout {
+  const safeWidth = Math.max(1, width);
+  const safeHeight = Math.max(1, height);
+  if (renderSettings.aspectRatioLocked < 0.5) {
+    return { left: 0, top: 0, width: safeWidth, height: safeHeight };
+  }
+  const ratioX =
+    Number.isFinite(renderSettings.aspectRatioX) && renderSettings.aspectRatioX > 0 ? renderSettings.aspectRatioX : safeWidth;
+  const ratioY =
+    Number.isFinite(renderSettings.aspectRatioY) && renderSettings.aspectRatioY > 0 ? renderSettings.aspectRatioY : safeHeight;
+  const targetRatio = ratioX / ratioY;
+  if (!Number.isFinite(targetRatio) || targetRatio <= 1.0e-6) {
+    return { left: 0, top: 0, width: safeWidth, height: safeHeight };
+  }
+  const containerRatio = safeWidth / safeHeight;
+  if (containerRatio > targetRatio) {
+    const activeWidth = safeHeight * targetRatio;
+    return { left: 0.5 * (safeWidth - activeWidth), top: 0, width: activeWidth, height: safeHeight };
+  }
+  const activeHeight = safeWidth / targetRatio;
+  return { left: 0, top: 0.5 * (safeHeight - activeHeight), width: safeWidth, height: activeHeight };
+}
+
 function isEditableEventTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) {
     return false;
@@ -60,10 +135,34 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
   const isHoveringRef = useRef(false);
   const lastPointerUvRef = useRef<[number, number] | null>(null);
   const dragRef = useRef<{ pointerId: number; mode: "orbit" | "orbit-origin" | "pan" | "zoom" } | null>(null);
+  const [wrapperSize, setWrapperSize] = useState<{ width: number; height: number }>({ width: 1, height: 1 });
 
   const sceneKey = useMemo(
     () => `${props.integrator.id}::${props.geometrySource}`,
     [props.geometrySource, props.integrator.id]
+  );
+  const canvasLayout = useMemo(
+    () => resolveViewportCanvasLayout(wrapperSize.width, wrapperSize.height, props.renderSettings),
+    [
+      props.renderSettings.aspectRatioLocked,
+      props.renderSettings.aspectRatioX,
+      props.renderSettings.aspectRatioY,
+      wrapperSize.height,
+      wrapperSize.width
+    ]
+  );
+  const canvasStyle = useMemo<CSSProperties>(
+    () => ({
+      left: `${canvasLayout.left}px`,
+      top: `${canvasLayout.top}px`,
+      width: `${canvasLayout.width}px`,
+      height: `${canvasLayout.height}px`
+    }),
+    [canvasLayout]
+  );
+  const aspectRatioOverlayLabel = useMemo(
+    () => formatAspectRatioLabel(props.renderSettings),
+    [props.renderSettings.aspectRatioLocked, props.renderSettings.aspectRatioX, props.renderSettings.aspectRatioY]
   );
 
   useEffect(() => {
@@ -156,7 +255,13 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
 
     const resize = (): void => {
       const rect = wrapper.getBoundingClientRect();
-      renderer.setDisplaySize(rect.width, rect.height, window.devicePixelRatio || 1);
+      const width = Math.max(1, rect.width);
+      const height = Math.max(1, rect.height);
+      setWrapperSize((prev) =>
+        Math.abs(prev.width - width) < 0.5 && Math.abs(prev.height - height) < 0.5 ? prev : { width, height }
+      );
+      const layout = resolveViewportCanvasLayout(width, height, props.renderSettings);
+      renderer.setDisplaySize(layout.width, layout.height, window.devicePixelRatio || 1);
     };
 
     const observer = new ResizeObserver(resize);
@@ -164,7 +269,12 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
     resize();
 
     return () => observer.disconnect();
-  }, [sceneKey]);
+  }, [
+    props.renderSettings.aspectRatioLocked,
+    props.renderSettings.aspectRatioX,
+    props.renderSettings.aspectRatioY,
+    sceneKey
+  ]);
 
   useEffect(() => {
     let raf = 0;
@@ -386,6 +496,7 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
       <canvas
         ref={canvasRef}
         className="viewport-canvas"
+        style={canvasStyle}
         tabIndex={0}
         onPointerEnter={(event) => {
           updatePointerUv(event.clientX, event.clientY);
@@ -404,6 +515,11 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
           dragRef.current = null;
         }}
       />
+      {aspectRatioOverlayLabel !== null ? (
+        <div className="viewport-aspect-overlay" aria-label={`Viewport aspect ratio ${aspectRatioOverlayLabel}`}>
+          {aspectRatioOverlayLabel}
+        </div>
+      ) : null}
     </div>
   );
 }
