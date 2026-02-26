@@ -1,5 +1,7 @@
 import type { UniformDefinition, UniformValue } from "../core/parser/types";
 import { clamp, computeRgbIntensity, normalizeRgbByIntensity, parseHexColorToRgb, rgbToHexColor, scaleRgb, type Rgb } from "../utils/colorUi";
+import { ColorPickerButton } from "./ColorPickerButton";
+import { ToggleSwitch } from "./ToggleSwitch";
 
 interface UniformPanelProps {
   uniforms: UniformDefinition[];
@@ -39,14 +41,14 @@ function UniformControl(props: UniformControlProps): JSX.Element {
   if (definition.type === "bool") {
     const boolValue = value === true;
     return (
-      <label className="uniform-row uniform-bool">
+      <div className="uniform-row uniform-bool">
         <span className="uniform-label">{definition.name}</span>
-        <input
-          type="checkbox"
+        <ToggleSwitch
           checked={boolValue}
-          onChange={(event) => props.onChange(event.target.checked)}
+          ariaLabel={definition.name}
+          onChange={(checked) => props.onChange(checked)}
         />
-      </label>
+      </div>
     );
   }
 
@@ -199,13 +201,11 @@ function ColorUniformControl(props: ColorUniformControlProps): JSX.Element {
     <div className="uniform-vector">
       <div className="uniform-vector-header">
         <span className="uniform-label">{definition.name}</span>
-        <input
-          className="uniform-color-preview uniform-color-picker"
-          type="color"
-          aria-label={`${definition.name} color`}
+        <ColorPickerButton
+          ariaLabel={`${definition.name} color`}
           value={colorHex}
-          onChange={(event) => {
-            const parsed = parseHexColorToRgb(event.target.value);
+          onChange={(nextHex) => {
+            const parsed = parseHexColorToRgb(nextHex);
             if (parsed === null) {
               return;
             }

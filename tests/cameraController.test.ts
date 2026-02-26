@@ -72,6 +72,33 @@ describe("cameraController", () => {
     expect(dot3(strafeDelta, basisAfterForward.right)).toBeGreaterThan(0);
   });
 
+  test("uses shift+WASD keyboard mode to pan in the view plane", () => {
+    const controller = new CameraController();
+    controller.setState({
+      eye: [0, 0, -6],
+      target: [0, 2, 0],
+      up: [0, 1, 0],
+      fov: 0.4
+    });
+
+    const before = controller.getState();
+    const basis = controller.getBasis();
+
+    const changed = controller.updateFromKeys(new Set(["w", "d"]), 1, true);
+    expect(changed).toBe(true);
+
+    const after = controller.getState();
+    const delta: [number, number, number] = [
+      after.eye[0] - before.eye[0],
+      after.eye[1] - before.eye[1],
+      after.eye[2] - before.eye[2]
+    ];
+
+    expect(dot3(delta, basis.dir)).toBeCloseTo(0, 6);
+    expect(dot3(delta, basis.upOrtho)).toBeGreaterThan(0);
+    expect(dot3(delta, basis.right)).toBeGreaterThan(0);
+  });
+
   test("uses GJ/YH to rotate camera and target around origin (same as shift-drag semantics)", () => {
     const controller = new CameraController();
     controller.setState({

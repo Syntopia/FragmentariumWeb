@@ -107,8 +107,11 @@ describe("UniformPanel", () => {
     const axisLabels = [...container.querySelectorAll(".uniform-axis")].map((entry) => entry.textContent?.trim().toLowerCase());
     expect(axisLabels).toEqual([]);
 
-    const colorPicker = screen.getByLabelText("Tint color") as HTMLInputElement;
-    fireEvent.change(colorPicker, { target: { value: "#336699" } });
+    expect(screen.getByRole("button", { name: "Tint color" }).textContent).toMatch(/^#[0-9A-F]{6}$/);
+
+    const colorPicker = container.querySelector('input[type="color"]') as HTMLInputElement | null;
+    expect(colorPicker).not.toBeNull();
+    fireEvent.change(colorPicker as HTMLInputElement, { target: { value: "#336699" } });
 
     expect(Array.isArray(lastValue)).toBe(true);
     if (Array.isArray(lastValue)) {

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start:server": "python3 scripts/start_server.py",
     "prebuild": "node scripts/bump_build_version.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",

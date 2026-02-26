@@ -10,12 +10,13 @@ interface HelpDialogProps {
 
 const KEYBOARD_SHORTCUTS: Array<{ keys: string; action: string }> = [
   { keys: "W / A / S / D", action: "Move camera (forward / left / back / right, camera-relative)" },
+  { keys: "Shift + W / A / S / D", action: "Pan camera (up / left / down / right in the view plane)" },
   { keys: "R / C", action: "Move camera down / up (world Y)" },
   { keys: "Q / E", action: "Roll camera left / right" },
   { keys: "G / J", action: "Rotate system around origin left / right (same as Shift+drag, screen horizontal)" },
   { keys: "Y / H", action: "Rotate system around origin up / down (same as Shift+drag, screen vertical)" },
   { keys: "F", action: "Focus depth-of-field at mouse cursor in 3D view" },
-  { keys: "Shift", action: "5x smaller movement / rotation steps (modifier)" },
+  { keys: "Shift", action: "5x smaller movement / rotation steps (modifier; also changes WASD to pan)" },
   { keys: "Ctrl", action: "5x larger movement / rotation steps (modifier)" },
   { keys: "1 / 2 / 3 / X", action: "Adjust base camera step size" }
 ];
@@ -71,77 +72,81 @@ export function HelpDialog(props: HelpDialogProps): JSX.Element | null {
           </div>
         </div>
 
-        <div className="help-section">
-          <h4>Graphics Diagnostics</h4>
-          {props.graphicsDiagnostics === null ? (
-            <p className="muted">Graphics diagnostics unavailable (renderer not initialized).</p>
-          ) : (
-            <div className="help-diagnostics">
-              <DiagnosticsSummary diagnostics={props.graphicsDiagnostics} />
-              <DiagnosticsCapabilities capabilities={props.graphicsDiagnostics.capabilities} />
-              <DiagnosticsKeyValueList
-                title="Context"
-                rows={[
-                  ["WebGL", props.graphicsDiagnostics.webglVersion],
-                  ["GLSL", props.graphicsDiagnostics.shadingLanguageVersion],
-                  ["Vendor", props.graphicsDiagnostics.vendor],
-                  ["Renderer", props.graphicsDiagnostics.renderer],
-                  ["Unmasked Vendor", props.graphicsDiagnostics.unmaskedVendor ?? "Unavailable"],
-                  ["Unmasked Renderer", props.graphicsDiagnostics.unmaskedRenderer ?? "Unavailable"],
-                  ["ANGLE / Backend", props.graphicsDiagnostics.angleInfo ?? "Not detected"]
-                ]}
-              />
-              <DiagnosticsKeyValueList
-                title="Context Attributes"
-                rows={formatContextAttributeRows(props.graphicsDiagnostics)}
-              />
-              <DiagnosticsKeyValueList
-                title="Limits"
-                rows={[
-                  ["Max texture size", String(props.graphicsDiagnostics.limits.maxTextureSize)],
-                  ["Max renderbuffer size", String(props.graphicsDiagnostics.limits.maxRenderbufferSize)],
-                  [
-                    "Max viewport dims",
-                    `${props.graphicsDiagnostics.limits.maxViewportDims[0]} x ${props.graphicsDiagnostics.limits.maxViewportDims[1]}`
-                  ],
-                  ["Max color attachments", String(props.graphicsDiagnostics.limits.maxColorAttachments)],
-                  ["Max draw buffers", String(props.graphicsDiagnostics.limits.maxDrawBuffers)],
-                  ["Max texture image units", String(props.graphicsDiagnostics.limits.maxTextureImageUnits)],
-                  [
-                    "Max combined texture units",
-                    String(props.graphicsDiagnostics.limits.maxCombinedTextureImageUnits)
-                  ],
-                  [
-                    "Max fragment uniform vectors",
-                    String(props.graphicsDiagnostics.limits.maxFragmentUniformVectors)
-                  ],
-                  ["Max samples", String(props.graphicsDiagnostics.limits.maxSamples)]
-                ]}
-              />
-              <DiagnosticsKeyValueList
-                title="Extensions"
-                rows={[
-                  [
-                    "EXT_color_buffer_float",
-                    props.graphicsDiagnostics.extensions.extColorBufferFloat ? "Available" : "Missing"
-                  ],
-                  [
-                    "EXT_color_buffer_half_float",
-                    props.graphicsDiagnostics.extensions.extColorBufferHalfFloat ? "Available" : "Missing"
-                  ],
-                  [
-                    "WEBGL_debug_renderer_info",
-                    props.graphicsDiagnostics.extensions.webglDebugRendererInfo ? "Available" : "Missing"
-                  ],
-                  [
-                    "EXT_disjoint_timer_query_webgl2",
-                    props.graphicsDiagnostics.extensions.extDisjointTimerQueryWebgl2 ? "Available" : "Missing"
-                  ]
-                ]}
-              />
-            </div>
-          )}
-        </div>
+        <details className="help-section help-collapsible-section">
+          <summary className="help-collapsible-summary">
+            <span className="help-collapsible-title">Graphics Diagnostics</span>
+          </summary>
+          <div className="help-collapsible-content">
+            {props.graphicsDiagnostics === null ? (
+              <p className="muted">Graphics diagnostics unavailable (renderer not initialized).</p>
+            ) : (
+              <div className="help-diagnostics">
+                <DiagnosticsSummary diagnostics={props.graphicsDiagnostics} />
+                <DiagnosticsCapabilities capabilities={props.graphicsDiagnostics.capabilities} />
+                <DiagnosticsKeyValueList
+                  title="Context"
+                  rows={[
+                    ["WebGL", props.graphicsDiagnostics.webglVersion],
+                    ["GLSL", props.graphicsDiagnostics.shadingLanguageVersion],
+                    ["Vendor", props.graphicsDiagnostics.vendor],
+                    ["Renderer", props.graphicsDiagnostics.renderer],
+                    ["Unmasked Vendor", props.graphicsDiagnostics.unmaskedVendor ?? "Unavailable"],
+                    ["Unmasked Renderer", props.graphicsDiagnostics.unmaskedRenderer ?? "Unavailable"],
+                    ["ANGLE / Backend", props.graphicsDiagnostics.angleInfo ?? "Not detected"]
+                  ]}
+                />
+                <DiagnosticsKeyValueList
+                  title="Context Attributes"
+                  rows={formatContextAttributeRows(props.graphicsDiagnostics)}
+                />
+                <DiagnosticsKeyValueList
+                  title="Limits"
+                  rows={[
+                    ["Max texture size", String(props.graphicsDiagnostics.limits.maxTextureSize)],
+                    ["Max renderbuffer size", String(props.graphicsDiagnostics.limits.maxRenderbufferSize)],
+                    [
+                      "Max viewport dims",
+                      `${props.graphicsDiagnostics.limits.maxViewportDims[0]} x ${props.graphicsDiagnostics.limits.maxViewportDims[1]}`
+                    ],
+                    ["Max color attachments", String(props.graphicsDiagnostics.limits.maxColorAttachments)],
+                    ["Max draw buffers", String(props.graphicsDiagnostics.limits.maxDrawBuffers)],
+                    ["Max texture image units", String(props.graphicsDiagnostics.limits.maxTextureImageUnits)],
+                    [
+                      "Max combined texture units",
+                      String(props.graphicsDiagnostics.limits.maxCombinedTextureImageUnits)
+                    ],
+                    [
+                      "Max fragment uniform vectors",
+                      String(props.graphicsDiagnostics.limits.maxFragmentUniformVectors)
+                    ],
+                    ["Max samples", String(props.graphicsDiagnostics.limits.maxSamples)]
+                  ]}
+                />
+                <DiagnosticsKeyValueList
+                  title="Extensions"
+                  rows={[
+                    [
+                      "EXT_color_buffer_float",
+                      props.graphicsDiagnostics.extensions.extColorBufferFloat ? "Available" : "Missing"
+                    ],
+                    [
+                      "EXT_color_buffer_half_float",
+                      props.graphicsDiagnostics.extensions.extColorBufferHalfFloat ? "Available" : "Missing"
+                    ],
+                    [
+                      "WEBGL_debug_renderer_info",
+                      props.graphicsDiagnostics.extensions.webglDebugRendererInfo ? "Available" : "Missing"
+                    ],
+                    [
+                      "EXT_disjoint_timer_query_webgl2",
+                      props.graphicsDiagnostics.extensions.extDisjointTimerQueryWebgl2 ? "Available" : "Missing"
+                    ]
+                  ]}
+                />
+              </div>
+            )}
+          </div>
+        </details>
       </div>
     </div>
   );

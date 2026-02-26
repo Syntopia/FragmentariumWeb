@@ -288,7 +288,11 @@ export function ViewportPane(props: ViewportPaneProps): JSX.Element {
       const delta = Math.min((now - previous) / 16.666, 3);
       previous = now;
 
-      if (!props.disableGlobalShortcuts && keys.size > 0 && controller.updateFromKeys(keys, delta * speedMultiplier)) {
+      if (
+        !props.disableGlobalShortcuts &&
+        keys.size > 0 &&
+        controller.updateFromKeys(keys, delta * speedMultiplier, modifiers.shift)
+      ) {
         const next = controller.getState();
         rendererRef.current?.setCamera(next);
         props.onCameraChange(next);

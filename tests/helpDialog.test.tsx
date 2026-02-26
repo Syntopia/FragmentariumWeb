@@ -67,6 +67,7 @@ describe("HelpDialog", () => {
     );
 
     expect(screen.getByText("Graphics Diagnostics")).toBeInTheDocument();
+    expect(screen.getByText("Shift + W / A / S / D")).toBeInTheDocument();
     expect(screen.getByText(/Missing required capability: EXT_color_buffer_float/)).toBeInTheDocument();
     expect(screen.getByText("ANGLE / Backend")).toBeInTheDocument();
     expect(screen.getAllByText(/D3D11/).length).toBeGreaterThan(0);

@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as Re
 import { DefinitionEditor } from "../components/DefinitionEditor";
 import { AppButton } from "../components/AppButton";
 import { BlockingTaskDialog } from "../components/BlockingTaskDialog";
+import { ColorPickerButton } from "../components/ColorPickerButton";
 import { ConfirmDiscardChangesDialog } from "../components/ConfirmDiscardChangesDialog";
 import { ConfirmDeleteLocalSystemDialog } from "../components/ConfirmDeleteLocalSystemDialog";
 import { SaveLocalSystemDialog } from "../components/SaveLocalSystemDialog";
 import { ExportRenderDialog, type ExportRenderDialogProgress } from "../components/ExportRenderDialog";
 import { HelpDialog } from "../components/HelpDialog";
+import { LegacyFragmentariumImportDialog } from "../components/LegacyFragmentariumImportDialog";
+import { ToggleSwitch } from "../components/ToggleSwitch";
 import {
   LOCAL_SESSION_GALLERY_ROOT_LABEL,
   SessionGalleryDialog,
@@ -15,13 +18,8 @@ import {
   type SessionGalleryStorageInfo
 } from "../components/SessionGalleryDialog";
 import { SplitLayout } from "../components/SplitLayout";
-import {
-  SystemsTreeView,
-  type SystemsTreeFolderNode,
-  type SystemsTreeNode
-} from "../components/SystemsTreeView";
+import { type SystemsTreeFolderNode, type SystemsTreeNode } from "../components/SystemsTreeView";
 import { UniformPanel } from "../components/UniformPanel";
-import { VerticalSplitLayout } from "../components/VerticalSplitLayout";
 import { VerticalTabList, type VerticalTabItem } from "../components/VerticalTabList";
 import { ViewportPane } from "../components/ViewportPane";
 import { DEFAULT_GITHUB_SESSION_GALLERY_SOURCE_URL } from "./sessionGalleryDefaults";
@@ -90,9 +88,9 @@ import {
   getColorTripletIntensity,
   getColorTripletIntensityStep,
   getColorTripletMax,
-  supportsHdrColorTripletIntensity,
-  type IntegratorColorTripletRenderItem
+  supportsHdrColorTripletIntensity
 } from "./integratorColorTriplets";
+import { buildIntegratorPanelRenderItems } from "./integratorOptionLayout";
 import { selectPresetForActivation } from "./presetSelection";
 import {
   appendPresetBlockToSource,
@@ -112,7 +110,6 @@ import { getUniformGroupNames, normalizeUniformGroupName } from "./uniformGroups
 import buildVersion from "../../build-version.json";
 
 const MIN_PANE_WIDTH = 240;
-const MIN_LEFT_SECTION_HEIGHT = 140;
 const EXPORT_STILL_TILE_THRESHOLD_PIXELS = 2048 * 2048;
 const EXPORT_STILL_TILE_SIZE = 1024;
 const DEFAULT_STARTUP_INTEGRATOR_ID = "de-pathtracer-physical";
@@ -1074,6 +1071,7 @@ export function App(): JSX.Element {
   const [settingsCopyActionsOpen, setSettingsCopyActionsOpen] = useState(false);
   const [sessionPngExportInProgress, setSessionPngExportInProgress] = useState(false);
   const [sessionGalleryOpen, setSessionGalleryOpen] = useState(false);
+  const [legacyImportDialogOpen, setLegacyImportDialogOpen] = useState(false);
   const [githubGallerySources, setGitHubGallerySources] = useState<GitHubGallerySourceState[]>(
     initialGitHubGallerySources.sources
   );
@@ -4353,94 +4351,75 @@ export function App(): JSX.Element {
 
   const leftPane = (
     <div className="pane-content left-pane left-pane-content">
-      <VerticalSplitLayout
-        topHeight={leftSystemsPaneHeightPx}
-        minTopHeight={MIN_LEFT_SECTION_HEIGHT}
-        minBottomHeight={MIN_LEFT_SECTION_HEIGHT}
-        onTopHeightChange={setLeftSystemsPaneHeightPx}
-        top={
-          <section className="section-block section-fill">
-            <h2>Systems</h2>
-            <SystemsTreeView
-              nodes={systemsTreeNodes}
-              activeEntryKey={selectedSystemKey}
-              onSelect={onSwitchSystem}
-              onDeleteLocal={onDeleteLocalSystem}
-              localPreviewUrlByPath={localSessionPreviewUrlsByPath}
-            />
-          </section>
-        }
-        bottom={
-          <section className="section-block section-fill">
-            <div className="section-header-row definition-actions-toolbar">
-              <div className="definition-actions-group definition-actions-group-main">
-                <AppButton
-                  variant="primary"
-                  onClick={() => compileSystem(selectedSystemKey)}
-                  disabled={isBlockingTaskActive}
-                  title="Build (F5)"
-                >
-                  Build (F5)
-                </AppButton>
-              </div>
-              <div className="definition-actions-group definition-actions-group-session">
-                <AppButton
-                  onClick={onSaveAsNewSession}
-                  disabled={isBlockingTaskActive}
-                  title="Save as New Session"
-                >
-                  Save New
-                </AppButton>
-                <AppButton
-                  onClick={() => void onUpdateCurrentSession()}
-                  disabled={!canUpdateCurrentSession || isBlockingTaskActive}
-                  title={selectedLocalPath === null ? "Update Current Session (disabled on presets)" : "Update Current Session"}
-                >
-                  Update
-                </AppButton>
-                <div className="header-menu-anchor" ref={definitionActionsRef}>
-                  <AppButton
-                    variant="ghost"
-                    className="header-menu-trigger definition-actions-more"
-                    aria-label="Definition actions"
-                    aria-haspopup="menu"
-                    aria-expanded={definitionActionsOpen}
-                    onClick={() => setDefinitionActionsOpen((prev) => !prev)}
-                    title="More actions"
-                  >
-                    ⋯
-                  </AppButton>
-                  {definitionActionsOpen ? (
-                    <div className="header-menu-popup" role="menu" aria-label="Definition actions menu">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          void onDownloadSessionPng();
-                        }}
-                        disabled={parseResult === null || sessionPngExportInProgress || isBlockingTaskActive}
-                      >
-                        {sessionPngExportInProgress ? "Exporting Session PNG..." : "Download Session PNG"}
-                      </button>
-                      <button type="button" role="menuitem" onClick={onBeautifySource}>
-                        Beautify Definition
-                      </button>
-                    </div>
-                  ) : null}
+      <section className="section-block grow">
+        <div className="section-header-row definition-actions-toolbar">
+          <div className="definition-actions-group definition-actions-group-main">
+            <AppButton
+              variant="primary"
+              onClick={() => compileSystem(selectedSystemKey)}
+              disabled={isBlockingTaskActive}
+              title="Build (F5)"
+            >
+              Build (F5)
+            </AppButton>
+          </div>
+          <div className="definition-actions-group definition-actions-group-session">
+            <AppButton
+              onClick={onSaveAsNewSession}
+              disabled={isBlockingTaskActive}
+              title="Save as New Session"
+            >
+              Save New
+            </AppButton>
+            <AppButton
+              onClick={() => void onUpdateCurrentSession()}
+              disabled={!canUpdateCurrentSession || isBlockingTaskActive}
+              title={selectedLocalPath === null ? "Update Current Session (disabled on presets)" : "Update Current Session"}
+            >
+              Update
+            </AppButton>
+            <div className="header-menu-anchor" ref={definitionActionsRef}>
+              <AppButton
+                variant="ghost"
+                className="header-menu-trigger definition-actions-more"
+                aria-label="Definition actions"
+                aria-haspopup="menu"
+                aria-expanded={definitionActionsOpen}
+                onClick={() => setDefinitionActionsOpen((prev) => !prev)}
+                title="More actions"
+              >
+                ⋯
+              </AppButton>
+              {definitionActionsOpen ? (
+                <div className="header-menu-popup" role="menu" aria-label="Definition actions menu">
+                  <button type="button" role="menuitem" onClick={onBeautifySource}>
+                    Beautify Definition
+                  </button>
                 </div>
-              </div>
+              ) : null}
             </div>
-            <DefinitionEditor
-              value={sourceDraft}
-              onChange={(next) => {
-                setEditorSourceBySystem((prev) => ({ ...prev, [selectedSystemKey]: next }));
-              }}
-              onBuild={() => compileSystem(selectedSystemKey)}
-              jumpRequest={editorJumpRequest}
-            />
-          </section>
-        }
-      />
+          </div>
+        </div>
+        <div className="definition-editor-panel">
+          <DefinitionEditor
+            value={sourceDraft}
+            onChange={(next) => {
+              setEditorSourceBySystem((prev) => ({ ...prev, [selectedSystemKey]: next }));
+            }}
+            onBuild={() => compileSystem(selectedSystemKey)}
+            jumpRequest={editorJumpRequest}
+          />
+        </div>
+        <div className="section-actions">
+          <AppButton
+            onClick={() => setLegacyImportDialogOpen(true)}
+            disabled={isBlockingTaskActive}
+            title="Open legacy Fragmentarium system browser"
+          >
+            Legacy Fragmentarium import...
+          </AppButton>
+        </div>
+      </section>
     </div>
   );
 
@@ -4466,6 +4445,7 @@ export function App(): JSX.Element {
           deleteLocalDialogPath !== null ||
           pendingSwitchEntryKey !== null ||
           sessionGalleryOpen ||
+          legacyImportDialogOpen ||
           isBlockingTaskActive ||
           exportDialogState !== null ||
           helpDialogOpen
@@ -4535,128 +4515,179 @@ export function App(): JSX.Element {
               <p className="muted">{activeIntegrator.description}</p>
 
               <div className="integrator-options">
-                {groupedIntegratorOptions.map(({ group, options }) => (
-                  <div key={group} className="integrator-option-group">
-                    <h3 className="integrator-option-group-title">{group}</h3>
-                    {buildIntegratorOptionRenderItems(options).map((item) => {
-                      if (item.kind === "single") {
-                        const option = item.option;
-                        const value = activeIntegratorOptions[option.key] ?? option.defaultValue;
-                        const step = optionStep(option);
-                        const isToggle = isIntegratorToggleOption(option);
-                        const isDefault = isNumericSliderAtDefault(value, option.defaultValue, step);
-                        return (
-                          <div className="uniform-row" key={option.key}>
-                            <span className="uniform-label">{option.label}</span>
-                            {isToggle ? (
-                              <div className="uniform-inputs uniform-inputs-checkbox">
-                                <label
-                                  className={`integrator-toggle-checkbox ${isDefault ? "slider-default" : "slider-changed"}`}
-                                >
-                                  <input
-                                    type="checkbox"
+                {groupedIntegratorOptions.map(({ group, options }) => {
+                  const panelItems = buildIntegratorPanelRenderItems(buildIntegratorOptionRenderItems(options));
+                  return (
+                    <div key={group} className="integrator-option-group">
+                      <h3 className="integrator-option-group-title">{group}</h3>
+                      {panelItems.map((item) => {
+                        if (item.kind === "single") {
+                          const option = item.option;
+                          const value = activeIntegratorOptions[option.key] ?? option.defaultValue;
+                          const step = optionStep(option);
+                          const isToggle = isIntegratorToggleOption(option);
+                          const isDefault = isNumericSliderAtDefault(value, option.defaultValue, step);
+                          if (isToggle) {
+                            return (
+                              <div className="integrator-control-row integrator-control-row-toggle" key={option.key}>
+                                <span className="integrator-control-label">{option.label}</span>
+                                <div className="integrator-control-main integrator-toggle-cell">
+                                  <ToggleSwitch
+                                    className={`integrator-toggle-checkbox ${isDefault ? "slider-default" : "slider-changed"}`}
                                     checked={value >= 0.5}
-                                    onChange={(event) =>
-                                      onIntegratorOptionChange(option.key, event.target.checked ? 1 : 0)
-                                    }
+                                    ariaLabel={option.label}
+                                    onChange={(checked) => onIntegratorOptionChange(option.key, checked ? 1 : 0)}
                                   />
-                                  <span>{value >= 0.5 ? "On" : "Off"}</span>
-                                </label>
+                                </div>
                               </div>
-                            ) : (
-                              <div className="uniform-inputs">
-                                <input
-                                  className={rangeSliderClassName(value, option.defaultValue, step)}
-                                  type="range"
-                                  min={option.min}
-                                  max={option.max}
-                                  step={step}
-                                  value={value}
-                                  onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
-                                />
-                                <input
-                                  className="uniform-number"
-                                  type="number"
-                                  min={option.min}
-                                  max={option.max}
-                                  step={step}
-                                  value={value}
-                                  onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        );
-                      }
+                            );
+                          }
+                          return (
+                            <div className="integrator-control-row" key={option.key}>
+                              <span className="integrator-control-label">{option.label}</span>
+                              <input
+                                className={`integrator-control-slider ${rangeSliderClassName(value, option.defaultValue, step)}`}
+                                type="range"
+                                min={option.min}
+                                max={option.max}
+                                step={step}
+                                value={value}
+                                onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
+                              />
+                              <input
+                                className="uniform-number integrator-control-value"
+                                type="number"
+                                min={option.min}
+                                max={option.max}
+                                step={step}
+                                value={value}
+                                onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
+                              />
+                            </div>
+                          );
+                        }
 
-                      const triplet = item as IntegratorColorTripletRenderItem;
-                      const colorHex = getColorTripletDisplayColorHex(triplet, activeIntegratorOptions);
-                      const intensity = getColorTripletIntensity(triplet, activeIntegratorOptions);
-                      const defaultIntensity = getColorTripletDefaultIntensity(triplet);
-                      const intensityStep = getColorTripletIntensityStep(triplet);
-                      const showIntensity = supportsHdrColorTripletIntensity(triplet);
-                      const intensityMax = getColorTripletMax(triplet);
+                        if (item.kind === "axisTriplet") {
+                          const axisRows = [
+                            { axisLabel: "X", option: item.x },
+                            { axisLabel: "Y", option: item.y },
+                            { axisLabel: "Z", option: item.z }
+                          ];
+                          return (
+                            <div
+                              className="integrator-vector-subgroup"
+                              key={`${item.x.key}:${item.y.key}:${item.z.key}`}
+                            >
+                              <div className="integrator-vector-subgroup-title">{item.label}</div>
+                              {axisRows.map(({ axisLabel, option }) => {
+                                const value = activeIntegratorOptions[option.key] ?? option.defaultValue;
+                                const step = optionStep(option);
+                                return (
+                                  <div
+                                    className="integrator-control-row integrator-control-row-nested integrator-control-row-axis"
+                                    key={option.key}
+                                  >
+                                    <span className="integrator-control-label integrator-control-label-sub">{axisLabel}</span>
+                                    <input
+                                      className={`integrator-control-slider ${rangeSliderClassName(value, option.defaultValue, step)}`}
+                                      type="range"
+                                      min={option.min}
+                                      max={option.max}
+                                      step={step}
+                                      value={value}
+                                      onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
+                                    />
+                                    <input
+                                      className="uniform-number integrator-control-value"
+                                      type="number"
+                                      min={option.min}
+                                      max={option.max}
+                                      step={step}
+                                      value={value}
+                                      onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        }
 
-                      return (
-                        <div className="uniform-vector integrator-color-control" key={`${triplet.r.key}:${triplet.g.key}:${triplet.b.key}`}>
-                          <div className="uniform-vector-header">
-                            <span className="uniform-label">{triplet.label}</span>
-                            <input
-                              className="uniform-color-preview uniform-color-picker"
-                              type="color"
-                              aria-label={`${triplet.label} color`}
-                              value={colorHex}
-                              onChange={(event) => {
-                                onIntegratorOptionPatch(colorTripletPatchFromHex(triplet, activeIntegratorOptions, event.target.value));
-                              }}
-                            />
-                          </div>
-                          {showIntensity ? (
-                            <div className="uniform-row compact">
-                              <span className="uniform-axis">i</span>
-                              <div className="uniform-inputs">
-                                <input
-                                  className={rangeSliderClassName(intensity, defaultIntensity, intensityStep)}
-                                  type="range"
-                                  min={0}
-                                  max={intensityMax}
-                                  step={intensityStep}
-                                  value={intensity}
-                                  onChange={(event) => {
+                        const triplet = item;
+                        const colorHex = getColorTripletDisplayColorHex(triplet, activeIntegratorOptions);
+                        const intensity = getColorTripletIntensity(triplet, activeIntegratorOptions);
+                        const defaultIntensity = getColorTripletDefaultIntensity(triplet);
+                        const intensityStep = getColorTripletIntensityStep(triplet);
+                        const showIntensity = supportsHdrColorTripletIntensity(triplet);
+                        const intensityMax = getColorTripletMax(triplet);
+
+                        return (
+                          <div
+                            className="integrator-color-control"
+                            key={`${triplet.r.key}:${triplet.g.key}:${triplet.b.key}`}
+                          >
+                            <div className="integrator-control-row integrator-control-row-color">
+                              <span className="integrator-control-label">{triplet.label}</span>
+                              <div className="integrator-control-main integrator-color-cell">
+                                <ColorPickerButton
+                                  className="integrator-color-picker-button"
+                                  ariaLabel={`${triplet.label} color`}
+                                  value={colorHex}
+                                  onChange={(nextHex) => {
                                     onIntegratorOptionPatch(
-                                      colorTripletPatchFromIntensity(
-                                        triplet,
-                                        activeIntegratorOptions,
-                                        Number(event.target.value)
-                                      )
-                                    );
-                                  }}
-                                />
-                                <input
-                                  className="uniform-number"
-                                  type="number"
-                                  min={0}
-                                  max={intensityMax}
-                                  step={intensityStep}
-                                  value={intensity}
-                                  onChange={(event) => {
-                                    onIntegratorOptionPatch(
-                                      colorTripletPatchFromIntensity(
-                                        triplet,
-                                        activeIntegratorOptions,
-                                        Number(event.target.value)
-                                      )
+                                      colorTripletPatchFromHex(triplet, activeIntegratorOptions, nextHex)
                                     );
                                   }}
                                 />
                               </div>
                             </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
+                            {showIntensity ? (
+                              <div className="integrator-control-row integrator-control-row-nested">
+                                <span className="integrator-control-label integrator-control-label-sub">
+                                  Intensity
+                                </span>
+                                <input
+                                  className={`integrator-control-slider ${rangeSliderClassName(intensity, defaultIntensity, intensityStep)}`}
+                                  type="range"
+                                  min={0}
+                                  max={intensityMax}
+                                  step={intensityStep}
+                                  value={intensity}
+                                  onChange={(event) => {
+                                    onIntegratorOptionPatch(
+                                      colorTripletPatchFromIntensity(
+                                        triplet,
+                                        activeIntegratorOptions,
+                                        Number(event.target.value)
+                                      )
+                                    );
+                                  }}
+                                />
+                                <input
+                                  className="uniform-number integrator-control-value"
+                                  type="number"
+                                  min={0}
+                                  max={intensityMax}
+                                  step={intensityStep}
+                                  value={intensity}
+                                  onChange={(event) => {
+                                    onIntegratorOptionPatch(
+                                      colorTripletPatchFromIntensity(
+                                        triplet,
+                                        activeIntegratorOptions,
+                                        Number(event.target.value)
+                                      )
+                                    );
+                                  }}
+                                />
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
               </div>
               <div className="tab-reset-row">
                 <AppButton onClick={onResetActiveIntegratorOptions}>
@@ -4796,14 +4827,14 @@ export function App(): JSX.Element {
                         </option>
                       ))}
                     </select>
-                    <label className="uniform-bool render-aspect-lock-toggle">
+                    <div className="uniform-bool render-aspect-lock-toggle">
                       <span>Lock</span>
-                      <input
-                        type="checkbox"
+                      <ToggleSwitch
                         checked={renderAspectRatioLocked}
-                        onChange={(event) => onRenderAspectRatioLockChange(event.target.checked)}
+                        ariaLabel="Lock render aspect ratio"
+                        onChange={onRenderAspectRatioLockChange}
                       />
-                    </label>
+                    </div>
                   </div>
                 </div>
 
@@ -5080,6 +5111,17 @@ export function App(): JSX.Element {
                 >
                   Paste Session JSON
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setSettingsCopyActionsOpen(false);
+                    void onDownloadSessionPng();
+                  }}
+                  disabled={parseResult === null || sessionPngExportInProgress || isBlockingTaskActive}
+                >
+                  {sessionPngExportInProgress ? "Exporting Session PNG..." : "Download Session PNG"}
+                </button>
                 <button type="button" role="menuitem" onClick={onResetAllSettings}>
                   Reset Session Settings
                 </button>
@@ -5224,6 +5266,18 @@ export function App(): JSX.Element {
         }
         onCancel={onCancelSaveLocalDialog}
         onSave={() => void onConfirmSaveLocalDialog()}
+      />
+      <LegacyFragmentariumImportDialog
+        open={legacyImportDialogOpen}
+        nodes={systemsTreeNodes}
+        activeEntryKey={selectedSystemKey}
+        onSelect={(entryKey) => {
+          setLegacyImportDialogOpen(false);
+          onSwitchSystem(entryKey);
+        }}
+        onDeleteLocal={onDeleteLocalSystem}
+        localPreviewUrlByPath={localSessionPreviewUrlsByPath}
+        onClose={() => setLegacyImportDialogOpen(false)}
       />
       <ConfirmDiscardChangesDialog
         open={pendingSwitchEntryKey !== null || pendingSessionPngImport !== null}

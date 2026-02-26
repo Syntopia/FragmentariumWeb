@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ExportInterpolationMode, ChangedValueSummary } from "../app/exportInterpolation";
 import type { WebCodecsMovieCodec } from "../utils/webcodecsWebmEncoder";
 import { AppButton } from "./AppButton";
+import { ToggleSwitch } from "./ToggleSwitch";
 
 export interface ExportRenderDialogProgress {
   overallProgress: number;
@@ -258,11 +259,11 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
             <span className="uniform-label">Aspect</span>
             <div className="uniform-bool export-aspect-lock">
               <span>{props.aspectRatioLocked ? `Locked ${aspectRatioLabel}` : "Unlocked"}</span>
-              <input
-                type="checkbox"
+              <ToggleSwitch
                 checked={props.aspectRatioLocked}
                 disabled={props.isExporting}
-                onChange={(event) => props.onAspectRatioLockChange(event.target.checked)}
+                ariaLabel="Lock export aspect ratio"
+                onChange={props.onAspectRatioLockChange}
               />
             </div>
           </label>

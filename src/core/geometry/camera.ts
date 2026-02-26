@@ -79,7 +79,7 @@ export class CameraController {
     return { dir, right: rightSafe, upOrtho };
   }
 
-  updateFromKeys(keys: Set<string>, deltaScale = 1): boolean {
+  updateFromKeys(keys: Set<string>, deltaScale = 1, panWithWasd = false): boolean {
     const basis = this.getBasis();
     const move = this.stepSize * deltaScale;
     const rotate = 0.05 * deltaScale;
@@ -95,13 +95,24 @@ export class CameraController {
       this.translate(scale(basis.right, move));
       changed = true;
     }
-    if (keys.has("w")) {
-      this.translate(scale(basis.dir, move));
-      changed = true;
-    }
-    if (keys.has("s")) {
-      this.translate(scale(basis.dir, -move));
-      changed = true;
+    if (panWithWasd) {
+      if (keys.has("w")) {
+        this.translate(scale(basis.upOrtho, move));
+        changed = true;
+      }
+      if (keys.has("s")) {
+        this.translate(scale(basis.upOrtho, -move));
+        changed = true;
+      }
+    } else {
+      if (keys.has("w")) {
+        this.translate(scale(basis.dir, move));
+        changed = true;
+      }
+      if (keys.has("s")) {
+        this.translate(scale(basis.dir, -move));
+        changed = true;
+      }
     }
     if (keys.has("r")) {
       this.translate(scale(worldUp, -move));
