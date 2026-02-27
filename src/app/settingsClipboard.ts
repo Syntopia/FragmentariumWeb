@@ -224,6 +224,10 @@ function asTimelineState(value: unknown): SessionTimelineState | null | undefine
     value.playbackDurationSeconds === undefined
       ? DEFAULT_TIMELINE_PLAYBACK_DURATION_SECONDS
       : Math.max(0.1, asFiniteNumber(value.playbackDurationSeconds, "timeline.playbackDurationSeconds"));
+  if (value.modifyAllKeyframes !== undefined && typeof value.modifyAllKeyframes !== "boolean") {
+    throw new Error("Invalid 'timeline.modifyAllKeyframes' value in clipboard payload.");
+  }
+  const modifyAllKeyframes = value.modifyAllKeyframes === undefined ? false : value.modifyAllKeyframes;
 
   const baselineSlicePlane = asSlicePlaneLockFrame(value.baseline.slicePlaneLockFrame);
   if (baselineSlicePlane === undefined) {
@@ -265,7 +269,8 @@ function asTimelineState(value: unknown): SessionTimelineState | null | undefine
     activeKeyId: value.activeKeyId,
     playheadT,
     interpolation,
-    playbackDurationSeconds
+    playbackDurationSeconds,
+    modifyAllKeyframes
   };
 }
 

@@ -187,7 +187,8 @@ describe("settingsClipboard", () => {
         activeKeyId: "a",
         playheadT: 0,
         interpolation: "monotone-cubic",
-        playbackDurationSeconds: 1.5
+        playbackDurationSeconds: 1.5,
+        modifyAllKeyframes: false
       }
     });
     const changed = buildSettingsClipboardPayload({
@@ -207,6 +208,7 @@ describe("settingsClipboard", () => {
     expect(parsed.timeline?.keyframes).toHaveLength(2);
     expect(parsed.timeline?.interpolation).toBe("monotone-cubic");
     expect(parsed.timeline?.keyframes[1].patch.uniformValues?.Detail).toBeCloseTo(-1.0);
+    expect(parsed.timeline?.modifyAllKeyframes).toBe(false);
     expect(serializeSettingsClipboardPayloadForSessionComparison(base)).not.toBe(
       serializeSettingsClipboardPayloadForSessionComparison(changed)
     );
@@ -240,5 +242,6 @@ describe("settingsClipboard", () => {
 
     const parsed = parseSettingsClipboardPayload(payload);
     expect(parsed.timeline?.playbackDurationSeconds).toBeCloseTo(3);
+    expect(parsed.timeline?.modifyAllKeyframes).toBe(false);
   });
 });

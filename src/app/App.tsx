@@ -93,6 +93,7 @@ import {
   interpolateTimelineSnapshotAt,
   resolveTimelineKeyframeSnapshot,
   updateTimelineActiveKeyPatch,
+  updateTimelineAllKeyPatches,
   type SessionTimelineState
 } from "./timeline";
 import { buildTimelineGraphLines } from "./timelineGraph";
@@ -133,6 +134,7 @@ import buildVersion from "../../build-version.json";
 
 const MIN_PANE_WIDTH = 240;
 const TIMELINE_PANEL_HEIGHT_PX = 176;
+const TIMELINE_RAIL_HEIGHT_PX = 36;
 const EXPORT_STILL_TILE_THRESHOLD_PIXELS = 2048 * 2048;
 const EXPORT_STILL_TILE_SIZE = 1024;
 const DEFAULT_STARTUP_INTEGRATOR_ID = "de-pathtracer-physical";
@@ -1082,6 +1084,7 @@ export function App(): JSX.Element {
   const [sessionPngExportInProgress, setSessionPngExportInProgress] = useState(false);
   const [sessionGalleryOpen, setSessionGalleryOpen] = useState(false);
   const [legacyImportDialogOpen, setLegacyImportDialogOpen] = useState(false);
+  const [editorWrapLines, setEditorWrapLines] = useState(false);
   const [githubGallerySources, setGitHubGallerySources] = useState<GitHubGallerySourceState[]>(
     initialGitHubGallerySources.sources
   );
@@ -1110,6 +1113,8 @@ export function App(): JSX.Element {
   const timelineScrubInProgressRef = useRef(false);
   const timelinePlaybackRafRef = useRef<number | null>(null);
   const timelinePlaybackConfigRef = useRef<TimelinePlaybackConfig | null>(null);
+  const previousSelectedSystemKeyRef = useRef<string | null>(null);
+  const previousSelectedTimelineKeyCountRef = useRef(0);
   const fileDragDepthRef = useRef(0);
 
   const [parsedBySystem, setParsedBySystem] = useState<Record<string, ParseResult>>({});
@@ -1699,6 +1704,23 @@ export function App(): JSX.Element {
   );
 
   useEffect(() => {
+    const keyCount = timelineBySystem[selectedSystemKey]?.keyframes.length ?? 0;
+    const previousSystemKey = previousSelectedSystemKeyRef.current;
+    const systemChanged = previousSystemKey !== selectedSystemKey;
+    const previousCount = systemChanged ? 0 : previousSelectedTimelineKeyCountRef.current;
+
+    previousSelectedSystemKeyRef.current = selectedSystemKey;
+    previousSelectedTimelineKeyCountRef.current = keyCount;
+
+    if (timelineEnabled) {
+      return;
+    }
+    if (keyCount > 1 && (systemChanged || previousCount <= 1)) {
+      setTimelineEnabled(true);
+    }
+  }, [selectedSystemKey, timelineBySystem, timelineEnabled]);
+
+  useEffect(() => {
     if (!timelineEnabled) {
       return;
     }
@@ -1722,7 +1744,9 @@ export function App(): JSX.Element {
       if (timeline === undefined) {
         return prev;
       }
-      const nextTimeline = updateTimelineActiveKeyPatch(timeline, timelineSnapshot);
+      const nextTimeline = timeline.modifyAllKeyframes
+        ? updateTimelineAllKeyPatches(timeline, timelineSnapshot)
+        : updateTimelineActiveKeyPatch(timeline, timelineSnapshot);
       if (nextTimeline === timeline) {
         return prev;
       }
@@ -2661,36 +2685,50 @@ export function App(): JSX.Element {
 
   const onTimelineStepKeyframe = (direction: "prev" | "next"): void => {
     setTimelinePlaying(false);
-    let snapshotToApply: ReturnType<typeof buildTimelineSnapshot> | null = null;
+    const timeline = timelineBySystem[selectedSystemKey];
+    if (timeline === undefined || timeline.keyframes.length <= 1) {
+      return;
+    }
+    const sorted = [...timeline.keyframes].sort((a, b) => {
+      if (Math.abs(a.t - b.t) > 1e-6) {
+        return a.t - b.t;
+      }
+      return a.id.localeCompare(b.id);
+    });
+    const currentIndex = sorted.findIndex((entry) => entry.id === timeline.activeKeyId);
+    if (currentIndex < 0) {
+      return;
+    }
+    const nextIndex = direction === "prev" ? currentIndex - 1 : currentIndex + 1;
+    if (nextIndex < 0 || nextIndex >= sorted.length) {
+      return;
+    }
+    const keyframe = sorted[nextIndex];
+    const nextTimeline: SessionTimelineState = {
+      ...timeline,
+      activeKeyId: keyframe.id,
+      playheadT: keyframe.t
+    };
+    const snapshotToApply = resolveTimelineKeyframeSnapshot(nextTimeline, keyframe.id);
+
     setTimelineBySystem((prev) => {
-      const timeline = prev[selectedSystemKey];
-      if (timeline === undefined || timeline.keyframes.length <= 1) {
+      const current = prev[selectedSystemKey];
+      if (current === undefined) {
         return prev;
       }
-      const sorted = [...timeline.keyframes].sort((a, b) => {
-        if (Math.abs(a.t - b.t) > 1e-6) {
-          return a.t - b.t;
-        }
-        return a.id.localeCompare(b.id);
-      });
-      const currentIndex = sorted.findIndex((entry) => entry.id === timeline.activeKeyId);
-      if (currentIndex < 0) {
+      if (
+        current.activeKeyId === keyframe.id &&
+        Math.abs(current.playheadT - keyframe.t) <= 1e-6
+      ) {
         return prev;
       }
-      const nextIndex = direction === "prev" ? currentIndex - 1 : currentIndex + 1;
-      if (nextIndex < 0 || nextIndex >= sorted.length) {
-        return prev;
-      }
-      const keyframe = sorted[nextIndex];
-      const nextTimeline: SessionTimelineState = {
-        ...timeline,
-        activeKeyId: keyframe.id,
-        playheadT: keyframe.t
-      };
-      snapshotToApply = resolveTimelineKeyframeSnapshot(nextTimeline, keyframe.id);
       return {
         ...prev,
-        [selectedSystemKey]: nextTimeline
+        [selectedSystemKey]: {
+          ...current,
+          activeKeyId: keyframe.id,
+          playheadT: keyframe.t
+        }
       };
     });
     if (snapshotToApply !== null) {
@@ -2822,6 +2860,22 @@ export function App(): JSX.Element {
     if (!changed) {
       pushToast("Keyframes are already evenly spaced.");
     }
+  };
+
+  const onTimelineModifyAllChange = (enabled: boolean): void => {
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined || timeline.modifyAllKeyframes === enabled) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [selectedSystemKey]: {
+          ...timeline,
+          modifyAllKeyframes: enabled
+        }
+      };
+    });
   };
 
   const onTimelineActivateKeyframe = (keyId: string): void => {
@@ -4961,6 +5015,7 @@ export function App(): JSX.Element {
             }}
             onBuild={() => compileFragment(selectedSystemKey)}
             jumpRequest={editorJumpRequest}
+            wrapLines={editorWrapLines}
           />
         </div>
         <div className="section-actions">
@@ -4990,6 +5045,14 @@ export function App(): JSX.Element {
               <div className="header-menu-popup is-upward" role="menu" aria-label="Fragment actions menu">
                 <button type="button" role="menuitem" onClick={onBeautifySource}>
                   Beautify Fragment
+                </button>
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={editorWrapLines}
+                  onClick={() => setEditorWrapLines((prev) => !prev)}
+                >
+                  {editorWrapLines ? "✓ Wrap lines" : "Wrap lines"}
                 </button>
                 <button
                   type="button"
@@ -5919,40 +5982,75 @@ export function App(): JSX.Element {
     </div>
   );
 
-  const timelinePane = timelineEnabled ? (
-    <div className="timeline-shell" style={{ height: `${TIMELINE_PANEL_HEIGHT_PX}px` }}>
-      {selectedTimeline !== null ? (
-        <TimelinePanel
-          keyframes={selectedTimeline.keyframes}
-          activeKeyId={selectedTimeline.activeKeyId}
-          playheadT={selectedTimeline.playheadT}
-          interpolation={selectedTimeline.interpolation}
-          graphLines={timelineGraphLines}
-          isPlaying={timelinePlaying}
-          playbackDurationSeconds={selectedTimeline.playbackDurationSeconds}
-          onPlaybackDurationChange={onTimelinePlaybackDurationChange}
-          onPlay={onTimelinePlay}
-          onPause={onTimelinePause}
-          onPrevKeyframe={() => onTimelineStepKeyframe("prev")}
-          onNextKeyframe={() => onTimelineStepKeyframe("next")}
-          onInterpolationChange={onTimelineInterpolationChange}
-          onScrubPreview={onTimelineScrubPreview}
-          onScrubCommit={onTimelineScrubCommit}
-          onActivateKeyframe={onTimelineActivateKeyframe}
-          onMoveKeyframe={onTimelineMoveKeyframe}
-          onMoveKeyframeEnd={onTimelineMoveKeyframeEnd}
-          onAddLeft={() => onTimelineAddKeyframe("left")}
-          onAddRight={() => onTimelineAddKeyframe("right")}
-          onDeleteActive={onTimelineDeleteActiveKey}
-          onFit={onTimelineFit}
-        />
-      ) : (
-        <section className="timeline-panel section-block">
-          <p className="muted">Initializing timeline…</p>
-        </section>
-      )}
+  const timelineKeyframeCount = selectedTimeline?.keyframes.length ?? 0;
+  const timelineShellHeightPx =
+    timelineEnabled ? TIMELINE_PANEL_HEIGHT_PX + TIMELINE_RAIL_HEIGHT_PX : TIMELINE_RAIL_HEIGHT_PX;
+  const timelinePane = (
+    <div
+      className={`timeline-shell${timelineEnabled ? " is-expanded" : " is-collapsed"}`}
+      style={{ height: `${timelineShellHeightPx}px` }}
+    >
+      <section className="timeline-rail" aria-label="Timeline controls">
+        <div className="timeline-rail-main">
+          <UiIcon name="session" size={13} />
+          <span className="timeline-rail-label">Timeline</span>
+          <span className={`timeline-rail-badge${timelineKeyframeCount <= 0 ? " is-empty" : ""}`}>
+            {timelineKeyframeCount <= 0
+              ? "No keyframes yet"
+              : `${timelineKeyframeCount} key frame${timelineKeyframeCount === 1 ? "" : "s"}`}
+          </span>
+        </div>
+        <AppButton
+          className="timeline-rail-toggle-button"
+          onClick={() => onTimelineToggle(!timelineEnabled)}
+          disabled={isBlockingTaskActive}
+          title={timelineEnabled ? "Hide timeline panel" : "Show timeline panel"}
+        >
+          <span className="button-content">
+            <span aria-hidden="true">{timelineEnabled ? "▴" : "▾"}</span>
+            <span>{timelineEnabled ? "Hide timeline" : "Show timeline"}</span>
+          </span>
+        </AppButton>
+      </section>
+
+      {timelineEnabled ? (
+        <div className="timeline-shell-panel">
+          {selectedTimeline !== null ? (
+            <TimelinePanel
+              keyframes={selectedTimeline.keyframes}
+              activeKeyId={selectedTimeline.activeKeyId}
+              playheadT={selectedTimeline.playheadT}
+              interpolation={selectedTimeline.interpolation}
+              graphLines={timelineGraphLines}
+              isPlaying={timelinePlaying}
+              playbackDurationSeconds={selectedTimeline.playbackDurationSeconds}
+              onPlaybackDurationChange={onTimelinePlaybackDurationChange}
+              onPlay={onTimelinePlay}
+              onPause={onTimelinePause}
+              onPrevKeyframe={() => onTimelineStepKeyframe("prev")}
+              onNextKeyframe={() => onTimelineStepKeyframe("next")}
+              onInterpolationChange={onTimelineInterpolationChange}
+              onScrubPreview={onTimelineScrubPreview}
+              onScrubCommit={onTimelineScrubCommit}
+              onActivateKeyframe={onTimelineActivateKeyframe}
+              onMoveKeyframe={onTimelineMoveKeyframe}
+              onMoveKeyframeEnd={onTimelineMoveKeyframeEnd}
+              onAddLeft={() => onTimelineAddKeyframe("left")}
+              onAddRight={() => onTimelineAddKeyframe("right")}
+              onDeleteActive={onTimelineDeleteActiveKey}
+              onFit={onTimelineFit}
+              modifyAllKeyframes={selectedTimeline.modifyAllKeyframes}
+              onModifyAllKeyframesChange={onTimelineModifyAllChange}
+            />
+          ) : (
+            <section className="timeline-panel section-block">
+              <p className="muted">Initializing timeline…</p>
+            </section>
+          )}
+        </div>
+      ) : null}
     </div>
-  ) : null;
+  );
 
   return (
     <div
@@ -5980,21 +6078,6 @@ export function App(): JSX.Element {
           </AppButton>
         </div>
         <div className="topbar-actions">
-          <div className="topbar-timeline-toggle">
-            <span className="topbar-timeline-toggle-label">Timeline</span>
-            <ToggleSwitch
-              checked={timelineEnabled}
-              disabled={isBlockingTaskActive}
-              ariaLabel="Toggle timeline panel"
-              onChange={onTimelineToggle}
-            />
-          </div>
-          <AppButton onClick={() => setHelpDialogOpen(true)} disabled={isBlockingTaskActive}>
-            <span className="button-content">
-              <UiIcon name="help" size={13} />
-              <span>Help...</span>
-            </span>
-          </AppButton>
           <AppButton
             variant="primary"
             className="topbar-export-button"
@@ -6004,6 +6087,12 @@ export function App(): JSX.Element {
             <span className="button-content">
               <UiIcon name="export" size={13} />
               <span>Export Render...</span>
+            </span>
+          </AppButton>
+          <AppButton onClick={() => setHelpDialogOpen(true)} disabled={isBlockingTaskActive}>
+            <span className="button-content">
+              <UiIcon name="help" size={13} />
+              <span>Help...</span>
             </span>
           </AppButton>
         </div>

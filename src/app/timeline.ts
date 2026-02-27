@@ -46,6 +46,7 @@ export interface SessionTimelineState {
   playheadT: number;
   interpolation: ExportInterpolationMode;
   playbackDurationSeconds: number;
+  modifyAllKeyframes: boolean;
 }
 
 const EPSILON = 1e-6;
@@ -152,7 +153,8 @@ export function cloneTimelineState(state: SessionTimelineState): SessionTimeline
     activeKeyId: state.activeKeyId,
     playheadT: state.playheadT,
     interpolation: state.interpolation,
-    playbackDurationSeconds: state.playbackDurationSeconds
+    playbackDurationSeconds: state.playbackDurationSeconds,
+    modifyAllKeyframes: state.modifyAllKeyframes
   };
 }
 
@@ -540,8 +542,82 @@ export function createTimelineState(snapshot: SessionTimelineSnapshot): SessionT
     activeKeyId: keyId,
     playheadT: 0.5,
     interpolation: "ease-in-out",
-    playbackDurationSeconds: DEFAULT_TIMELINE_PLAYBACK_DURATION_SECONDS
+    playbackDurationSeconds: DEFAULT_TIMELINE_PLAYBACK_DURATION_SECONDS,
+    modifyAllKeyframes: false
   };
+}
+
+function patchIsEmpty(patch: SessionTimelinePatch): boolean {
+  return (
+    patch.integratorId === undefined &&
+    patch.integratorOptions === undefined &&
+    patch.renderSettings === undefined &&
+    patch.uniformValues === undefined &&
+    patch.camera === undefined &&
+    patch.slicePlaneLockFrame === undefined
+  );
+}
+
+interface CameraChangeMask {
+  eye: [boolean, boolean, boolean];
+  target: [boolean, boolean, boolean];
+  up: [boolean, boolean, boolean];
+  fov: boolean;
+}
+
+function buildCameraChangeMask(current: CameraState, baseline: CameraState): CameraChangeMask {
+  return {
+    eye: [
+      !uniformValueEquals(current.eye[0], baseline.eye[0]),
+      !uniformValueEquals(current.eye[1], baseline.eye[1]),
+      !uniformValueEquals(current.eye[2], baseline.eye[2])
+    ],
+    target: [
+      !uniformValueEquals(current.target[0], baseline.target[0]),
+      !uniformValueEquals(current.target[1], baseline.target[1]),
+      !uniformValueEquals(current.target[2], baseline.target[2])
+    ],
+    up: [
+      !uniformValueEquals(current.up[0], baseline.up[0]),
+      !uniformValueEquals(current.up[1], baseline.up[1]),
+      !uniformValueEquals(current.up[2], baseline.up[2])
+    ],
+    fov: !uniformValueEquals(current.fov, baseline.fov)
+  };
+}
+
+function cameraChangeMaskIsEmpty(mask: CameraChangeMask): boolean {
+  return (
+    !mask.eye[0] &&
+    !mask.eye[1] &&
+    !mask.eye[2] &&
+    !mask.target[0] &&
+    !mask.target[1] &&
+    !mask.target[2] &&
+    !mask.up[0] &&
+    !mask.up[1] &&
+    !mask.up[2] &&
+    !mask.fov
+  );
+}
+
+function applyCameraMask(base: CameraState, source: CameraState, mask: CameraChangeMask): CameraState {
+  const next = cloneCameraState(base);
+  for (let i = 0; i < 3; i += 1) {
+    if (mask.eye[i]) {
+      next.eye[i] = source.eye[i];
+    }
+    if (mask.target[i]) {
+      next.target[i] = source.target[i];
+    }
+    if (mask.up[i]) {
+      next.up[i] = source.up[i];
+    }
+  }
+  if (mask.fov) {
+    next.fov = source.fov;
+  }
+  return next;
 }
 
 export function captureTimelinePatch(
@@ -733,6 +809,53 @@ export function updateTimelineActiveKeyPatch(
       patch: nextPatch
     };
   });
+  if (!changed) {
+    return state;
+  }
+  return {
+    ...state,
+    keyframes: nextKeyframes
+  };
+}
+
+export function updateTimelineAllKeyPatches(
+  state: SessionTimelineState,
+  snapshot: SessionTimelineSnapshot
+): SessionTimelineState {
+  const activeSnapshot = resolveTimelineKeyframeSnapshot(state, state.activeKeyId);
+  if (activeSnapshot === null) {
+    return state;
+  }
+  const changedPatch = captureTimelinePatch(snapshot, activeSnapshot);
+  const cameraMask = buildCameraChangeMask(snapshot.camera, activeSnapshot.camera);
+  const hasCameraChanges = !cameraChangeMaskIsEmpty(cameraMask);
+  const sharedPatch: SessionTimelinePatch =
+    changedPatch.camera === undefined ? changedPatch : { ...changedPatch, camera: undefined };
+  if (patchIsEmpty(sharedPatch) && !hasCameraChanges) {
+    return state;
+  }
+
+  let changed = false;
+  const nextKeyframes = state.keyframes.map((keyframe) => {
+    const keySnapshot = resolveTimelineSnapshotFromPatch(state.baseline, keyframe.patch);
+    const updatedSharedSnapshot = resolveTimelineSnapshotFromPatch(keySnapshot, sharedPatch);
+    const updatedSnapshot = hasCameraChanges
+      ? {
+          ...updatedSharedSnapshot,
+          camera: applyCameraMask(updatedSharedSnapshot.camera, snapshot.camera, cameraMask)
+        }
+      : updatedSharedSnapshot;
+    const updatedPatch = captureTimelinePatch(updatedSnapshot, state.baseline);
+    if (patchEquals(keyframe.patch, updatedPatch)) {
+      return keyframe;
+    }
+    changed = true;
+    return {
+      ...keyframe,
+      patch: updatedPatch
+    };
+  });
+
   if (!changed) {
     return state;
   }

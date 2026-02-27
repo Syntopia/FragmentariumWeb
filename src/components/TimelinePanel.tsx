@@ -3,6 +3,7 @@ import type { ExportInterpolationMode } from "../app/exportInterpolation";
 import type { SessionTimelineKeyframe } from "../app/timeline";
 import type { TimelineGraphLine } from "../app/timelineGraph";
 import { AppButton } from "./AppButton";
+import { ToggleSwitch } from "./ToggleSwitch";
 import { UiIcon } from "./UiIcon";
 
 interface TimelinePanelProps {
@@ -28,6 +29,8 @@ interface TimelinePanelProps {
   onAddRight: () => void;
   onDeleteActive: () => void;
   onFit: () => void;
+  modifyAllKeyframes: boolean;
+  onModifyAllKeyframesChange: (enabled: boolean) => void;
 }
 
 interface TimelinePointerInteraction {
@@ -275,7 +278,7 @@ export function TimelinePanel(props: TimelinePanelProps): JSX.Element {
           ) : null}
           <div className="timeline-playhead" style={{ left: `${clamp01(props.playheadT) * 100}%` }} />
           {keyframes.map((keyframe) => {
-            const isActive = keyframe.id === props.activeKeyId;
+            const isActive = props.modifyAllKeyframes || keyframe.id === props.activeKeyId;
             return (
               <button
                 key={keyframe.id}
@@ -309,6 +312,19 @@ export function TimelinePanel(props: TimelinePanelProps): JSX.Element {
       <div className="timeline-toolbar timeline-toolbar-bottom">
         <div className="timeline-toolbar-group timeline-toolbar-group-keyframes">
           <span className="timeline-toolbar-caption">Key frames</span>
+          <span
+            className="timeline-modify-all-toggle"
+            title="Modify all keyframes: when enabled, changing any option updates that same option value on every keyframe."
+          >
+            <span className="timeline-modify-all-label">Modify all</span>
+            <ToggleSwitch
+              checked={props.modifyAllKeyframes}
+              onChange={props.onModifyAllKeyframesChange}
+              ariaLabel="Modify all keyframes"
+              onLabel="On"
+              offLabel="Off"
+            />
+          </span>
           <AppButton onClick={props.onAddLeft} title="Add a new keyframe before the active keyframe">
             <span className="button-content">
               <UiIcon name="add-left" size={13} />

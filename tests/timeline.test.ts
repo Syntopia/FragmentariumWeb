@@ -8,7 +8,8 @@ import {
   evenlyDistributeTimelineKeyframes,
   fitTimelineKeyframes,
   interpolateTimelineSnapshotAt,
-  resolveTimelineSnapshotFromPatch
+  resolveTimelineSnapshotFromPatch,
+  updateTimelineAllKeyPatches
 } from "../src/app/timeline";
 
 const UNIFORMS: UniformDefinition[] = [
@@ -248,5 +249,110 @@ describe("timeline", () => {
     expect(lockedPatch.renderSettings?.aspectRatioLocked).toBe(1);
     expect(lockedPatch.renderSettings?.aspectRatioX).toBeCloseTo(16);
     expect(lockedPatch.renderSettings?.aspectRatioY).toBeCloseTo(9);
+  });
+
+  test("modify all updates changed uniform field across all keyframes", () => {
+    const baseline = makeSnapshot();
+    const state = createTimelineState(baseline);
+    state.keyframes = [
+      {
+        id: "left",
+        t: 0,
+        patch: captureTimelinePatch(
+          makeSnapshot({
+            uniformValues: {
+              ...baseline.uniformValues,
+              Detail: -2,
+              Toggle: false
+            }
+          }),
+          baseline
+        )
+      },
+      {
+        id: "right",
+        t: 1,
+        patch: captureTimelinePatch(
+          makeSnapshot({
+            uniformValues: {
+              ...baseline.uniformValues,
+              Detail: 1,
+              Toggle: true
+            }
+          }),
+          baseline
+        )
+      }
+    ];
+    state.activeKeyId = "left";
+
+    const editedActive = makeSnapshot({
+      uniformValues: {
+        ...baseline.uniformValues,
+        Detail: -0.5,
+        Toggle: false
+      }
+    });
+    const updated = updateTimelineAllKeyPatches(state, editedActive);
+    const left = resolveTimelineSnapshotFromPatch(updated.baseline, updated.keyframes[0].patch);
+    const right = resolveTimelineSnapshotFromPatch(updated.baseline, updated.keyframes[1].patch);
+    expect(left.uniformValues.Detail).toBeCloseTo(-0.5);
+    expect(right.uniformValues.Detail).toBeCloseTo(-0.5);
+    expect(left.uniformValues.Toggle).toBe(false);
+    expect(right.uniformValues.Toggle).toBe(true);
+  });
+
+  test("modify all updates changed camera field across all keyframes", () => {
+    const baseline = makeSnapshot();
+    const state = createTimelineState(baseline);
+    state.keyframes = [
+      {
+        id: "a",
+        t: 0,
+        patch: captureTimelinePatch(
+          makeSnapshot({
+            camera: {
+              eye: [0, 0, -6],
+              target: [0, 0, 0],
+              up: [0, 1, 0],
+              fov: 0.4
+            }
+          }),
+          baseline
+        )
+      },
+      {
+        id: "b",
+        t: 1,
+        patch: captureTimelinePatch(
+          makeSnapshot({
+            camera: {
+              eye: [1, 2, -3],
+              target: [0.2, -0.1, 0],
+              up: [0, 0, 1],
+              fov: 0.9
+            }
+          }),
+          baseline
+        )
+      }
+    ];
+    state.activeKeyId = "a";
+
+    const editedActive = makeSnapshot({
+      camera: {
+        eye: [2, 3, -4],
+        target: [0, 0, 0],
+        up: [0, 1, 0],
+        fov: 0.4
+      }
+    });
+    const updated = updateTimelineAllKeyPatches(state, editedActive);
+    const first = resolveTimelineSnapshotFromPatch(updated.baseline, updated.keyframes[0].patch);
+    const second = resolveTimelineSnapshotFromPatch(updated.baseline, updated.keyframes[1].patch);
+    expect(first.camera.eye).toEqual([2, 3, -4]);
+    expect(second.camera.eye).toEqual([2, 3, -4]);
+    expect(first.camera.fov).toBeCloseTo(0.4);
+    expect(second.camera.fov).toBeCloseTo(0.9);
   });
 });
