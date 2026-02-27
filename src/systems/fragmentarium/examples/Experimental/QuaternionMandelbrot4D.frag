@@ -5,7 +5,7 @@
 
 vec4 orbitTrap = vec4(1.0e20);
 #group 4D Quaternion Mandelbrot
-uniform vec3 RotVector; slider[(0,0,0),(1,1,1),(1,1,1)]
+uniform vec3 RotVector; direction[(1,0,0)]
 
 uniform float RotAngle; slider[0.00,0,180]
 

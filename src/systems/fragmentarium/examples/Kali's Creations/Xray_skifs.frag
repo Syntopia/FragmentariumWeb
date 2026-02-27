@@ -14,7 +14,7 @@
 uniform float FOV; slider[0,0.4,2.0] NotLockable
 uniform vec3 Eye; slider[(-50,-50,-50),(0,0,-10),(50,50,50)] NotLockable
 uniform vec3 Target; slider[(-50,-50,-50),(0,0,0),(50,50,50)] NotLockable
-uniform vec3 Up; slider[(0,0,0),(0,1,0),(0,0,0)] NotLockable
+uniform vec3 Up; direction[(0,1,0)] NotLockable
 
 varying vec3 dirDx;
 varying vec3 dirDy;

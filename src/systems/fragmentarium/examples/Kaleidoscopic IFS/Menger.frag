@@ -11,7 +11,7 @@ vec4 orbitTrap = vec4(1.0e20);
 // Scale parameter. A perfect Menger is 3.0
 uniform float Scale; slider[0.00,3.0,4.00]
 
-uniform vec3 RotVector; slider[(0,0,0),(1,1,1),(1,1,1)]
+uniform vec3 RotVector; direction[(1,0,0)]
 
 uniform float RotAngle; slider[0.00,0,180]
 

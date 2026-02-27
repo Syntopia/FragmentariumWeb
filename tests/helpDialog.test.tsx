@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 
 import { HelpDialog } from "../src/components/HelpDialog";
@@ -49,7 +49,7 @@ function makeDiagnostics(overrides?: Partial<RendererGraphicsDiagnostics>): Rend
 }
 
 describe("HelpDialog", () => {
-  test("shows graphics diagnostics and flags missing required capabilities", () => {
+  test("shows about text and tab-specific shortcuts/diagnostics content", () => {
     const diagnostics = makeDiagnostics({
       capabilities: [
         { label: "WebGL2 context", required: true, available: true },
@@ -66,8 +66,15 @@ describe("HelpDialog", () => {
       />
     );
 
-    expect(screen.getByText("Graphics Diagnostics")).toBeInTheDocument();
+    expect(screen.getByText("Fragmentarium Web")).toBeInTheDocument();
+    expect(screen.getByText("Version 0.9.234.")).toBeInTheDocument();
+    expect(screen.getByText("Acknowledgement")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Shortcuts" }));
     expect(screen.getByText("Shift + W / A / S / D")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Diagnostics" }));
+    expect(screen.getByText("Graphics Diagnostics")).toBeInTheDocument();
     expect(screen.getByText(/Missing required capability: EXT_color_buffer_float/)).toBeInTheDocument();
     expect(screen.getByText("ANGLE / Backend")).toBeInTheDocument();
     expect(screen.getAllByText(/D3D11/).length).toBeGreaterThan(0);

@@ -24,7 +24,7 @@ describe("SaveLocalSystemDialog", () => {
     );
 
     expect(screen.getByRole("button", { name: "Overwrite" })).toBeInTheDocument();
-    expect(screen.getByText("Existing local system will be overwritten.")).toBeInTheDocument();
+    expect(screen.getByText("Existing session will be overwritten.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Overwrite" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

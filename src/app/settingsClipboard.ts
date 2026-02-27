@@ -4,6 +4,14 @@ import type { UniformValue } from "../core/parser/types";
 import { DEFAULT_RENDER_SETTINGS } from "../core/render/renderer";
 import type { RenderSettings, SlicePlaneLockFrame } from "../core/render/renderer";
 import type { CameraState } from "../core/geometry/camera";
+import { clampDirectionComponents, normalizeDirectionArray } from "../utils/direction";
+import {
+  DEFAULT_TIMELINE_PLAYBACK_DURATION_SECONDS,
+  cloneTimelineState,
+  type SessionTimelinePatch,
+  type SessionTimelineSlicePlanePatch,
+  type SessionTimelineState
+} from "./timeline";
 
 export const SETTINGS_CLIPBOARD_FORMAT = "fragmentarium-web-settings-v1";
 
@@ -23,6 +31,7 @@ export interface SettingsClipboardPayload {
   uniformValues: Record<string, UniformValue>;
   camera: CameraState;
   slicePlaneLockFrame?: SlicePlaneLockFrame | null;
+  timeline?: SessionTimelineState | null;
   systemDefinition?: SettingsClipboardSystemDefinition;
 }
 
@@ -34,6 +43,7 @@ interface BuildSettingsClipboardPayloadArgs {
   uniformValues: Record<string, UniformValue>;
   camera: CameraState;
   slicePlaneLockFrame?: SlicePlaneLockFrame | null;
+  timeline?: SessionTimelineState | null;
   systemDefinition?: SettingsClipboardSystemDefinition;
 }
 
@@ -94,6 +104,168 @@ function asSlicePlaneLockFrame(value: unknown): SlicePlaneLockFrame | null | und
   return {
     origin: asVec3(value.origin, "slicePlaneLockFrame.origin"),
     normal: asVec3(value.normal, "slicePlaneLockFrame.normal")
+  };
+}
+
+const RENDER_SETTINGS_PATCH_KEYS = new Set<keyof RenderSettings>([
+  "interactionResolutionScale",
+  "maxSubframes",
+  "tileCount",
+  "tilesPerFrame",
+  "aspectRatioLocked",
+  "aspectRatioX",
+  "aspectRatioY",
+  "toneMapping",
+  "exposure",
+  "gamma",
+  "brightness",
+  "contrast",
+  "saturation"
+]);
+
+function asRenderSettingsPatch(value: unknown, fieldName: string): Partial<RenderSettings> {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid '${fieldName}' value in clipboard payload.`);
+  }
+  const next: Partial<RenderSettings> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (!RENDER_SETTINGS_PATCH_KEYS.has(key as keyof RenderSettings)) {
+      throw new Error(`Invalid '${fieldName}.${key}' value in clipboard payload.`);
+    }
+    next[key as keyof RenderSettings] = asFiniteNumber(raw, `${fieldName}.${key}`);
+  }
+  return next;
+}
+
+function asTimelineSlicePlanePatch(value: unknown, fieldName: string): SessionTimelineSlicePlanePatch {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid '${fieldName}' value in clipboard payload.`);
+  }
+  if (value.kind === "null") {
+    return { kind: "null" };
+  }
+  if (value.kind === "value") {
+    return {
+      kind: "value",
+      value: {
+        origin: asVec3(value.value !== undefined && isRecord(value.value) ? value.value.origin : undefined, `${fieldName}.value.origin`),
+        normal: asVec3(value.value !== undefined && isRecord(value.value) ? value.value.normal : undefined, `${fieldName}.value.normal`)
+      }
+    };
+  }
+  throw new Error(`Invalid '${fieldName}.kind' value in clipboard payload.`);
+}
+
+function asTimelinePatch(value: unknown, fieldName: string): SessionTimelinePatch {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid '${fieldName}' value in clipboard payload.`);
+  }
+
+  const patch: SessionTimelinePatch = {};
+
+  if (value.integratorId !== undefined) {
+    if (typeof value.integratorId !== "string" || value.integratorId.length === 0) {
+      throw new Error(`Invalid '${fieldName}.integratorId' value in clipboard payload.`);
+    }
+    patch.integratorId = value.integratorId;
+  }
+  if (value.integratorOptions !== undefined) {
+    patch.integratorOptions = asIntegratorOptions(value.integratorOptions);
+  }
+  if (value.renderSettings !== undefined) {
+    patch.renderSettings = asRenderSettingsPatch(value.renderSettings, `${fieldName}.renderSettings`);
+  }
+  if (value.uniformValues !== undefined) {
+    patch.uniformValues = asUniformValueMap(value.uniformValues);
+  }
+  if (value.camera !== undefined) {
+    patch.camera = asCameraState(value.camera);
+  }
+  if (value.slicePlaneLockFrame !== undefined) {
+    patch.slicePlaneLockFrame = asTimelineSlicePlanePatch(value.slicePlaneLockFrame, `${fieldName}.slicePlaneLockFrame`);
+  }
+
+  return patch;
+}
+
+function asTimelineState(value: unknown): SessionTimelineState | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    throw new Error("Invalid 'timeline' value in clipboard payload.");
+  }
+  if (value.version !== 1) {
+    throw new Error("Invalid 'timeline.version' value in clipboard payload.");
+  }
+  if (!isRecord(value.baseline)) {
+    throw new Error("Invalid 'timeline.baseline' value in clipboard payload.");
+  }
+  if (!Array.isArray(value.keyframes) || value.keyframes.length === 0) {
+    throw new Error("Invalid 'timeline.keyframes' value in clipboard payload.");
+  }
+  if (typeof value.activeKeyId !== "string" || value.activeKeyId.length === 0) {
+    throw new Error("Invalid 'timeline.activeKeyId' value in clipboard payload.");
+  }
+  const interpolation = value.interpolation;
+  if (
+    interpolation !== "linear" &&
+    interpolation !== "ease-in-out" &&
+    interpolation !== "monotone-cubic" &&
+    interpolation !== "catmull-rom"
+  ) {
+    throw new Error("Invalid 'timeline.interpolation' value in clipboard payload.");
+  }
+  const playheadT = asFiniteNumber(value.playheadT, "timeline.playheadT");
+  const playbackDurationSeconds =
+    value.playbackDurationSeconds === undefined
+      ? DEFAULT_TIMELINE_PLAYBACK_DURATION_SECONDS
+      : Math.max(0.1, asFiniteNumber(value.playbackDurationSeconds, "timeline.playbackDurationSeconds"));
+
+  const baselineSlicePlane = asSlicePlaneLockFrame(value.baseline.slicePlaneLockFrame);
+  if (baselineSlicePlane === undefined) {
+    throw new Error("Invalid 'timeline.baseline.slicePlaneLockFrame' value in clipboard payload.");
+  }
+  if (typeof value.baseline.integratorId !== "string" || value.baseline.integratorId.length === 0) {
+    throw new Error("Invalid 'timeline.baseline.integratorId' value in clipboard payload.");
+  }
+
+  const keyframes = value.keyframes.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`Invalid 'timeline.keyframes[${index}]' value in clipboard payload.`);
+    }
+    if (typeof entry.id !== "string" || entry.id.length === 0) {
+      throw new Error(`Invalid 'timeline.keyframes[${index}].id' value in clipboard payload.`);
+    }
+    return {
+      id: entry.id,
+      t: asFiniteNumber(entry.t, `timeline.keyframes[${index}].t`),
+      patch: asTimelinePatch(entry.patch, `timeline.keyframes[${index}].patch`)
+    };
+  });
+
+  if (!keyframes.some((entry) => entry.id === value.activeKeyId)) {
+    throw new Error("Invalid 'timeline.activeKeyId' value in clipboard payload.");
+  }
+
+  return {
+    version: 1,
+    baseline: {
+      integratorId: value.baseline.integratorId,
+      integratorOptions: asIntegratorOptions(value.baseline.integratorOptions),
+      renderSettings: asRenderSettings(value.baseline.renderSettings),
+      uniformValues: asUniformValueMap(value.baseline.uniformValues),
+      camera: asCameraState(value.baseline.camera),
+      slicePlaneLockFrame: baselineSlicePlane
+    },
+    keyframes,
+    activeKeyId: value.activeKeyId,
+    playheadT,
+    interpolation,
+    playbackDurationSeconds
   };
 }
 
@@ -221,13 +393,54 @@ export function coerceIntegratorOptionsForId(
   const integrator = getIntegratorById(integratorId);
   const defaults = getDefaultIntegratorOptions(integratorId);
   const next: IntegratorOptionValues = { ...defaults };
+  const directionTriplets = new Map<
+    string,
+    {
+      x?: typeof integrator.options[number];
+      y?: typeof integrator.options[number];
+      z?: typeof integrator.options[number];
+    }
+  >();
 
   for (const option of integrator.options) {
     const raw = candidate[option.key];
     if (raw === undefined) {
+      // keep default
+    } else {
+      next[option.key] = clamp(raw, option.min, option.max);
+    }
+
+    if (option.control !== "direction") {
       continue;
     }
-    next[option.key] = clamp(raw, option.min, option.max);
+    const axisMatch = /^(.*)(X|Y|Z)$/.exec(option.key);
+    if (axisMatch === null || axisMatch[1].length === 0) {
+      throw new Error(`Direction option '${option.key}' must end with X, Y, or Z.`);
+    }
+    const existing = directionTriplets.get(axisMatch[1]) ?? {};
+    if (axisMatch[2] === "X") {
+      existing.x = option;
+    } else if (axisMatch[2] === "Y") {
+      existing.y = option;
+    } else {
+      existing.z = option;
+    }
+    directionTriplets.set(axisMatch[1], existing);
+  }
+
+  for (const [baseKey, triplet] of directionTriplets) {
+    if (triplet.x === undefined || triplet.y === undefined || triplet.z === undefined) {
+      throw new Error(`Direction option triplet '${baseKey}' is incomplete.`);
+    }
+    const clamped = clampDirectionComponents([
+      clamp(next[triplet.x.key], triplet.x.min, triplet.x.max),
+      clamp(next[triplet.y.key], triplet.y.min, triplet.y.max),
+      clamp(next[triplet.z.key], triplet.z.min, triplet.z.max)
+    ]);
+    const normalized = normalizeDirectionArray(clamped, `Integrator option '${baseKey}'`);
+    next[triplet.x.key] = normalized[0];
+    next[triplet.y.key] = normalized[1];
+    next[triplet.z.key] = normalized[2];
   }
   return next;
 }
@@ -258,7 +471,13 @@ export function buildSettingsClipboardPayload(
           : {
               origin: [...args.slicePlaneLockFrame.origin],
               normal: [...args.slicePlaneLockFrame.normal]
-            }
+            },
+    timeline:
+      args.timeline === undefined
+        ? undefined
+        : args.timeline === null
+          ? null
+          : cloneTimelineState(args.timeline)
   };
 
   if (args.systemDefinition !== undefined) {
@@ -287,6 +506,7 @@ function buildSessionComparisonShape(payload: SettingsClipboardPayload): unknown
     uniformValues: payload.uniformValues,
     camera: payload.camera,
     slicePlaneLockFrame: payload.slicePlaneLockFrame,
+    timeline: payload.timeline,
     systemDefinition:
       payload.systemDefinition === undefined
         ? undefined
@@ -331,6 +551,7 @@ export function parseSettingsClipboardPayload(raw: string): SettingsClipboardPay
     uniformValues: asUniformValueMap(parsed.uniformValues),
     camera: asCameraState(parsed.camera),
     slicePlaneLockFrame: asSlicePlaneLockFrame(parsed.slicePlaneLockFrame),
+    timeline: asTimelineState(parsed.timeline),
     systemDefinition: asSystemDefinition(parsed.systemDefinition)
   };
 }

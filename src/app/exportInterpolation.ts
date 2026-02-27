@@ -7,8 +7,13 @@ import {
   slerpQuat
 } from "../core/geometry/quaternion";
 import type { UniformDefinition, UniformValue } from "../core/parser/types";
+import { normalizeDirectionArray } from "../utils/direction";
 
-export type ExportInterpolationMode = "linear" | "ease-in-out";
+export type ExportInterpolationMode =
+  | "linear"
+  | "ease-in-out"
+  | "monotone-cubic"
+  | "catmull-rom";
 
 export interface ChangedValueSummary {
   name: string;
@@ -29,6 +34,155 @@ export function applyInterpolationMode(mode: ExportInterpolationMode, tRaw: numb
     return t * t * (3 - 2 * t); // smoothstep
   }
   return t;
+}
+
+interface InterpolateScalarSegmentArgs {
+  mode: ExportInterpolationMode;
+  segmentT: number;
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+  xPrev?: number;
+  yPrev?: number;
+  xNext?: number;
+  yNext?: number;
+}
+
+function safeSpan(x0: number, x1: number): number {
+  return Math.max(1e-6, x1 - x0);
+}
+
+function slope(y0: number, y1: number, x0: number, x1: number): number {
+  return (y1 - y0) / safeSpan(x0, x1);
+}
+
+function sameSign(a: number, b: number): boolean {
+  return (a < 0 && b < 0) || (a > 0 && b > 0);
+}
+
+function hermiteInterpolate(y0: number, y1: number, m0: number, m1: number, segmentT: number, h: number): number {
+  const t = clamp01(segmentT);
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const h00 = 2 * t3 - 3 * t2 + 1;
+  const h10 = t3 - 2 * t2 + t;
+  const h01 = -2 * t3 + 3 * t2;
+  const h11 = t3 - t2;
+  return h00 * y0 + h10 * h * m0 + h01 * y1 + h11 * h * m1;
+}
+
+function catmullRomTangent(
+  xPrev: number | undefined,
+  yPrev: number | undefined,
+  x0: number,
+  y0: number,
+  xNext: number | undefined,
+  yNext: number | undefined
+): number {
+  if (xPrev === undefined || yPrev === undefined) {
+    if (xNext === undefined || yNext === undefined) {
+      return 0;
+    }
+    return slope(y0, yNext, x0, xNext);
+  }
+  if (xNext === undefined || yNext === undefined) {
+    return slope(yPrev, y0, xPrev, x0);
+  }
+  const hPrev = safeSpan(xPrev, x0);
+  const hNext = safeSpan(x0, xNext);
+  const dPrev = (y0 - yPrev) / hPrev;
+  const dNext = (yNext - y0) / hNext;
+  return (hNext * dPrev + hPrev * dNext) / Math.max(1e-6, hPrev + hNext);
+}
+
+function monotoneTangentInternal(xPrev: number, yPrev: number, x0: number, y0: number, xNext: number, yNext: number): number {
+  const hPrev = safeSpan(xPrev, x0);
+  const hNext = safeSpan(x0, xNext);
+  const dPrev = (y0 - yPrev) / hPrev;
+  const dNext = (yNext - y0) / hNext;
+  if (!sameSign(dPrev, dNext)) {
+    return 0;
+  }
+  const w1 = 2 * hNext + hPrev;
+  const w2 = hNext + 2 * hPrev;
+  return (w1 + w2) / ((w1 / dPrev) + (w2 / dNext));
+}
+
+function monotoneTangentStart(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  x2: number | undefined,
+  y2: number | undefined
+): number {
+  const d0 = slope(y0, y1, x0, x1);
+  if (x2 === undefined || y2 === undefined) {
+    return d0;
+  }
+  const h0 = safeSpan(x0, x1);
+  const h1 = safeSpan(x1, x2);
+  const d1 = (y2 - y1) / h1;
+  let m = ((2 * h0 + h1) * d0 - h0 * d1) / Math.max(1e-6, h0 + h1);
+  if (!sameSign(m, d0)) {
+    m = 0;
+  } else if (!sameSign(d0, d1) && Math.abs(m) > Math.abs(3 * d0)) {
+    m = 3 * d0;
+  }
+  return m;
+}
+
+function monotoneTangentEnd(
+  xPrev: number | undefined,
+  yPrev: number | undefined,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number
+): number {
+  const dLast = slope(y0, y1, x0, x1);
+  if (xPrev === undefined || yPrev === undefined) {
+    return dLast;
+  }
+  const hLast = safeSpan(x0, x1);
+  const hPrev = safeSpan(xPrev, x0);
+  const dPrev = (y0 - yPrev) / hPrev;
+  let m = ((2 * hLast + hPrev) * dLast - hLast * dPrev) / Math.max(1e-6, hLast + hPrev);
+  if (!sameSign(m, dLast)) {
+    m = 0;
+  } else if (!sameSign(dLast, dPrev) && Math.abs(m) > Math.abs(3 * dLast)) {
+    m = 3 * dLast;
+  }
+  return m;
+}
+
+export function interpolateScalarSegment(args: InterpolateScalarSegmentArgs): number {
+  const t = clamp01(args.segmentT);
+  if (!Number.isFinite(args.y0) || !Number.isFinite(args.y1)) {
+    return Number.isFinite(args.y0) ? args.y0 : args.y1;
+  }
+  const h = safeSpan(args.x0, args.x1);
+  if (args.mode === "linear" || args.mode === "ease-in-out") {
+    const eased = applyInterpolationMode(args.mode, t);
+    return lerp(args.y0, args.y1, eased);
+  }
+
+  if (args.mode === "catmull-rom") {
+    const m0 = catmullRomTangent(args.xPrev, args.yPrev, args.x0, args.y0, args.x1, args.y1);
+    const m1 = catmullRomTangent(args.x0, args.y0, args.x1, args.y1, args.xNext, args.yNext);
+    return hermiteInterpolate(args.y0, args.y1, m0, m1, t, h);
+  }
+
+  const m0 =
+    args.xPrev !== undefined && args.yPrev !== undefined
+      ? monotoneTangentInternal(args.xPrev, args.yPrev, args.x0, args.y0, args.x1, args.y1)
+      : monotoneTangentStart(args.x0, args.y0, args.x1, args.y1, args.xNext, args.yNext);
+  const m1 =
+    args.xNext !== undefined && args.yNext !== undefined
+      ? monotoneTangentInternal(args.x0, args.y0, args.x1, args.y1, args.xNext, args.yNext)
+      : monotoneTangentEnd(args.xPrev, args.yPrev, args.x0, args.y0, args.x1, args.y1);
+  return hermiteInterpolate(args.y0, args.y1, m0, m1, t, h);
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -167,7 +321,12 @@ export function interpolateUniformValues(
       continue;
     }
 
-    out[definition.name] = start.map((entry, index) => lerp(Number(entry), Number(end[index]), t));
+    const interpolated = start.map((entry, index) => lerp(Number(entry), Number(end[index]), t));
+    if (definition.control === "direction") {
+      out[definition.name] = normalizeDirectionArray(interpolated, `Uniform '${definition.name}' direction`);
+      continue;
+    }
+    out[definition.name] = interpolated;
   }
 
   return out;

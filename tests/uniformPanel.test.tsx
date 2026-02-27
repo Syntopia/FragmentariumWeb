@@ -120,4 +120,45 @@ describe("UniformPanel", () => {
       expect(lastValue[2]).toBeCloseTo(153 / 255, 5);
     }
   });
+
+  test("renders direction controls without sliders and normalizes axis edits", () => {
+    const uniforms: UniformDefinition[] = [
+      {
+        name: "Up",
+        type: "vec3",
+        control: "direction",
+        group: "Camera",
+        min: [-1, -1, -1],
+        max: [1, 1, 1],
+        defaultValue: [0, 1, 0],
+        lockType: "notlocked",
+        tooltip: ""
+      }
+    ];
+
+    const values: Record<string, UniformValue> = { Up: [0, 1, 0] };
+    let lastValue: UniformValue | null = null;
+
+    const { container } = render(
+      <UniformPanel
+        uniforms={uniforms}
+        values={values}
+        onChange={(_name, value) => {
+          lastValue = value;
+        }}
+      />
+    );
+
+    expect(container.querySelectorAll('input[type="range"]')).toHaveLength(0);
+    const numericInputs = [...container.querySelectorAll(".uniform-direction-fields input[type=\"number\"]")] as HTMLInputElement[];
+    expect(numericInputs).toHaveLength(3);
+
+    fireEvent.change(numericInputs[0], { target: { value: "1" } });
+    expect(Array.isArray(lastValue)).toBe(true);
+    if (Array.isArray(lastValue)) {
+      expect(lastValue[0]).toBeCloseTo(Math.SQRT1_2, 5);
+      expect(lastValue[1]).toBeCloseTo(Math.SQRT1_2, 5);
+      expect(lastValue[2]).toBeCloseTo(0, 5);
+    }
+  });
 });

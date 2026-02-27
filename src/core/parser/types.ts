@@ -1,6 +1,6 @@
 export type UniformType = "float" | "int" | "bool" | "vec2" | "vec3" | "vec4";
 
-export type UniformControl = "slider" | "checkbox" | "color";
+export type UniformControl = "slider" | "checkbox" | "color" | "direction";
 
 export type UniformValue = number | boolean | number[];
 

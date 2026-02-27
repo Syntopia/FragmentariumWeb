@@ -6,7 +6,8 @@ import {
   buildChangedCameraSummaries,
   buildChangedUniformSummaries,
   buildInterpolatedExportState,
-  interpolateCameraState
+  interpolateCameraState,
+  interpolateScalarSegment
 } from "../src/app/exportInterpolation";
 
 const UNIFORMS: UniformDefinition[] = [
@@ -111,6 +112,37 @@ describe("exportInterpolation", () => {
     expect(applyInterpolationMode("linear", 0.5)).toBe(0.5);
     expect(applyInterpolationMode("ease-in-out", 0.5)).toBeCloseTo(0.5);
     expect(applyInterpolationMode("ease-in-out", 0.25)).toBeCloseTo(0.15625);
+    expect(applyInterpolationMode("monotone-cubic", 0.25)).toBeCloseTo(0.25);
+    expect(applyInterpolationMode("catmull-rom", 0.75)).toBeCloseTo(0.75);
+  });
+
+  test("interpolates scalar segments with monotone cubic and catmull-rom", () => {
+    const common = {
+      segmentT: 0.5,
+      x0: 0.25,
+      x1: 0.5,
+      y0: 1,
+      y1: 3,
+      xPrev: 0,
+      yPrev: 0.5,
+      xNext: 1,
+      yNext: 3.5
+    };
+    const monotone = interpolateScalarSegment({
+      ...common,
+      mode: "monotone-cubic"
+    });
+    const catmull = interpolateScalarSegment({
+      ...common,
+      mode: "catmull-rom"
+    });
+
+    expect(Number.isFinite(monotone)).toBe(true);
+    expect(Number.isFinite(catmull)).toBe(true);
+    expect(monotone).toBeGreaterThan(1);
+    expect(monotone).toBeLessThan(3);
+    expect(catmull).toBeGreaterThan(1);
+    expect(catmull).toBeLessThan(3.5);
   });
 
   test("builds changed summaries and skips constants", () => {

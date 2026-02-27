@@ -29,12 +29,12 @@ export function ConfirmDiscardChangesDialog(
       <div className="modal-window" role="dialog" aria-modal="true" aria-labelledby="discard-switch-dialog-title">
         <h3 id="discard-switch-dialog-title">Discard Unsaved Changes</h3>
         <p className="muted">
-          Switching systems or sessions will discard current unsaved changes.
+          Switching fragments or sessions will discard current unsaved changes.
         </p>
         <p className="dialog-warning">
           {props.targetLabel !== null
             ? `Discard changes and switch to '${props.targetLabel}'?`
-            : "Discard changes and switch to another system/session?"}
+            : "Discard changes and switch to another fragment/session?"}
         </p>
         <div className="modal-actions">
           <AppButton onClick={props.onCancel}>Cancel</AppButton>

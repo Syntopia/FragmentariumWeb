@@ -8,6 +8,7 @@ import type {
   UniformType,
   UniformValue,
 } from "./types";
+import { normalizeDirectionArray } from "../../utils/direction";
 
 const GROUP_DIRECTIVE = /^\s*#group\s+(.+)\s*$/i;
 const CAMERA_DIRECTIVE = /^\s*#camera\s+(.+)\s*$/i;
@@ -360,6 +361,31 @@ function parseAnnotatedUniform(
       );
     }
     throw new Error(`color[] only supports vec3/vec4 uniforms: ${line}`);
+  }
+
+  if (trailing.startsWith("direction[")) {
+    if (type !== "vec3") {
+      throw new Error(`direction[] only supports vec3 uniforms: ${line}`);
+    }
+    const directionMatch = trailing.match(/^direction\[(.*)\]\s*([A-Za-z]+)?\s*.*$/i);
+    if (directionMatch === null) {
+      throw new Error(`Invalid direction annotation: ${line}`);
+    }
+    const parts = splitTopLevelComma(directionMatch[1]);
+    if (parts.length !== 1) {
+      throw new Error(`direction[] expects exactly one vec3 tuple: ${line}`);
+    }
+    const defaultDirection = normalizeDirectionArray(
+      parseTuple(parts[0], 3),
+      `Uniform '${name}' direction`
+    );
+    return makeBase(
+      "direction",
+      [-1, -1, -1],
+      [1, 1, 1],
+      defaultDirection,
+      directionMatch[2]
+    );
   }
 
   if (trailing.startsWith("//")) {

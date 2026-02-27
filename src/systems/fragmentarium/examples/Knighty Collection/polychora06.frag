@@ -33,7 +33,7 @@ uniform float SRadius; slider[0,0.01,0.1]
 //If you want to dive inside the hypersphere. You will need to set the position of the camera at 0,0,0
 uniform bool useCameraAsRotVector; checkbox[false]
 
-uniform vec3 RotVector; slider[(0,0,0),(1,1,1),(1,1,1)]
+uniform vec3 RotVector; direction[(1,0,0)]
 
 uniform float RotAngle; slider[0.00,0,180]
 

@@ -34,6 +34,7 @@ const FRAGMENTARIUM_WORDS = new Set([
   "slider",
   "checkbox",
   "color",
+  "direction",
   "file",
   "Locked"
 ]);

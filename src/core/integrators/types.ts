@@ -1,3 +1,5 @@
+export type IntegratorOptionControl = "slider" | "direction";
+
 export interface IntegratorOptionDefinition {
   key: string;
   label: string;
@@ -5,6 +7,7 @@ export interface IntegratorOptionDefinition {
   max: number;
   defaultValue: number;
   step?: number;
+  control?: IntegratorOptionControl;
   group?: string;
   sharedSemantic?: string;
 }

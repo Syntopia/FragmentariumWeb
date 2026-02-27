@@ -185,7 +185,7 @@ vec3 getBRDFRay( in vec3 normal, in vec3 rd)
 	}
 }
 
-uniform vec3 sunDirection; slider[(-1,-1,-1),(1,1,1),(1,1,1)]
+uniform vec3 sunDirection; direction[(1,1,1)]
 uniform vec3 sunColor; slider[(0,0,0),(1,0.3,0.3),(1,1,1)]
 uniform vec3 skyColor; slider[(0,0,0),(0.3,0.3,1.0),(1,1,1)]
 uniform bool Bias; checkbox[true]
@@ -265,5 +265,4 @@ vec3 color(vec3 from, vec3 dir)
 	}
 	return color;
 }
-
 

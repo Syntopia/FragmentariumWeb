@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { AppButton } from "./AppButton";
 import type { RendererGraphicsCapabilityStatus, RendererGraphicsDiagnostics } from "../core/render/renderer";
 
@@ -13,8 +14,8 @@ const KEYBOARD_SHORTCUTS: Array<{ keys: string; action: string }> = [
   { keys: "Shift + W / A / S / D", action: "Pan camera (up / left / down / right in the view plane)" },
   { keys: "R / C", action: "Move camera down / up (world Y)" },
   { keys: "Q / E", action: "Roll camera left / right" },
-  { keys: "G / J", action: "Rotate system around origin left / right (same as Shift+drag, screen horizontal)" },
-  { keys: "Y / H", action: "Rotate system around origin up / down (same as Shift+drag, screen vertical)" },
+  { keys: "G / J", action: "Rotate fragment around origin left / right (same as Shift+drag, screen horizontal)" },
+  { keys: "Y / H", action: "Rotate fragment around origin up / down (same as Shift+drag, screen vertical)" },
   { keys: "F", action: "Focus depth-of-field at mouse cursor in 3D view" },
   { keys: "Shift", action: "5x smaller movement / rotation steps (modifier; also changes WASD to pan)" },
   { keys: "Ctrl", action: "5x larger movement / rotation steps (modifier)" },
@@ -23,17 +24,29 @@ const KEYBOARD_SHORTCUTS: Array<{ keys: string; action: string }> = [
 
 const MOUSE_SHORTCUTS: Array<{ gesture: string; action: string }> = [
   { gesture: "Left drag", action: "Orbit view (camera turns around eye)" },
-  { gesture: "Shift + Left drag", action: "Rotate system around origin" },
+  { gesture: "Shift + Left drag", action: "Rotate fragment around origin" },
   { gesture: "Right drag", action: "Pan camera" },
   { gesture: "Middle drag", action: "Zoom (FOV)" },
   { gesture: "Mouse wheel", action: "Dolly forward/back" },
   { gesture: "Shift + Mouse wheel", action: "Adjust camera step size" }
 ];
 
+type HelpTab = "about" | "shortcuts" | "diagnostics";
+
 export function HelpDialog(props: HelpDialogProps): JSX.Element | null {
+  const [activeTab, setActiveTab] = useState<HelpTab>("about");
+
+  useEffect(() => {
+    if (props.open) {
+      setActiveTab("about");
+    }
+  }, [props.open]);
+
   if (!props.open) {
     return null;
   }
+
+  const versionText = props.versionLabel.startsWith("v") ? props.versionLabel.slice(1) : props.versionLabel;
 
   return (
     <div className="modal-backdrop">
@@ -41,42 +54,112 @@ export function HelpDialog(props: HelpDialogProps): JSX.Element | null {
         <div className="help-modal-header">
           <div>
             <h3 id="help-dialog-title">Help</h3>
-            <div className="help-version">Fragmentarium Web {props.versionLabel}</div>
           </div>
           <AppButton onClick={props.onClose}>
             Close
           </AppButton>
         </div>
 
-        <div className="help-section">
-          <h4>Keyboard Shortcuts</h4>
-          <div className="help-shortcut-list">
-            {KEYBOARD_SHORTCUTS.map((entry) => (
-              <div key={entry.keys} className="help-shortcut-row">
-                <span className="help-shortcut-keys">{entry.keys}</span>
-                <span className="help-shortcut-action">{entry.action}</span>
-              </div>
-            ))}
-          </div>
+        <div className="help-tabs" role="tablist" aria-label="Help Sections">
+          <button
+            type="button"
+            role="tab"
+            className={`help-tab${activeTab === "about" ? " is-active" : ""}`}
+            aria-selected={activeTab === "about"}
+            aria-controls="help-tabpanel-about"
+            id="help-tab-about"
+            onClick={() => setActiveTab("about")}
+          >
+            About
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={`help-tab${activeTab === "shortcuts" ? " is-active" : ""}`}
+            aria-selected={activeTab === "shortcuts"}
+            aria-controls="help-tabpanel-shortcuts"
+            id="help-tab-shortcuts"
+            onClick={() => setActiveTab("shortcuts")}
+          >
+            Shortcuts
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={`help-tab${activeTab === "diagnostics" ? " is-active" : ""}`}
+            aria-selected={activeTab === "diagnostics"}
+            aria-controls="help-tabpanel-diagnostics"
+            id="help-tab-diagnostics"
+            onClick={() => setActiveTab("diagnostics")}
+          >
+            Diagnostics
+          </button>
         </div>
 
-        <div className="help-section">
-          <h4>Mouse Controls</h4>
-          <div className="help-shortcut-list">
-            {MOUSE_SHORTCUTS.map((entry) => (
-              <div key={entry.gesture} className="help-shortcut-row">
-                <span className="help-shortcut-keys">{entry.gesture}</span>
-                <span className="help-shortcut-action">{entry.action}</span>
-              </div>
-            ))}
+        {activeTab === "about" ? (
+          <div className="help-section help-about-section" role="tabpanel" id="help-tabpanel-about" aria-labelledby="help-tab-about">
+            <p className="help-about-heading">Fragmentarium Web</p>
+            <p className="help-about-line">Version {versionText}.</p>
+            <p className="help-about-line">An environment for exploring path traced 3D fractals.</p>
+            <p className="help-about-line">
+              This is a port of my classic Fragmentarium desktop application:{" "}
+              <a href="https://github.com/Syntopia/Fragmentarium">https://github.com/Syntopia/Fragmentarium</a>
+            </p>
+            <p className="help-about-line">
+              Created by Mikael Hvidtfeldt Christensen (together with OpenAI&apos;s Codex and Claude Code)
+            </p>
+            <p className="help-about-line">Licensed and distributed under MIT license.</p>
+            <p className="help-about-line">
+              Notice: some fragments are copyrighted by other authors, and may carry other licenses. Please check the
+              fragment file header before redistributing.
+            </p>
+            <h4>Acknowledgement</h4>
+            <p className="help-about-line">
+              Much of the inspiration and formulas for Fragmentarium came from the community at Fractal Forums,
+              including Tom Beddard, Jan Kadlec, Iñigo Quilez, Buddhi, Jesse, and others. Special thanks goes out to
+              Knighty and Kali for their great fragments. All fragments should include information about their origins
+              - please notify me, if I made any mis-attributions.
+            </p>
           </div>
-        </div>
+        ) : null}
 
-        <details className="help-section help-collapsible-section">
-          <summary className="help-collapsible-summary">
-            <span className="help-collapsible-title">Graphics Diagnostics</span>
-          </summary>
-          <div className="help-collapsible-content">
+        {activeTab === "shortcuts" ? (
+          <div
+            className="help-section help-shortcuts-section"
+            role="tabpanel"
+            id="help-tabpanel-shortcuts"
+            aria-labelledby="help-tab-shortcuts"
+          >
+            <h4>Keyboard Shortcuts</h4>
+            <div className="help-shortcut-list">
+              {KEYBOARD_SHORTCUTS.map((entry) => (
+                <div key={entry.keys} className="help-shortcut-row">
+                  <span className="help-shortcut-keys">{entry.keys}</span>
+                  <span className="help-shortcut-action">{entry.action}</span>
+                </div>
+              ))}
+            </div>
+
+            <h4>Mouse Controls</h4>
+            <div className="help-shortcut-list">
+              {MOUSE_SHORTCUTS.map((entry) => (
+                <div key={entry.gesture} className="help-shortcut-row">
+                  <span className="help-shortcut-keys">{entry.gesture}</span>
+                  <span className="help-shortcut-action">{entry.action}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {activeTab === "diagnostics" ? (
+          <div
+            className="help-section help-diagnostics-section"
+            role="tabpanel"
+            id="help-tabpanel-diagnostics"
+            aria-labelledby="help-tab-diagnostics"
+          >
+            <h4>Graphics Diagnostics</h4>
             {props.graphicsDiagnostics === null ? (
               <p className="muted">Graphics diagnostics unavailable (renderer not initialized).</p>
             ) : (
@@ -146,7 +229,7 @@ export function HelpDialog(props: HelpDialogProps): JSX.Element | null {
               </div>
             )}
           </div>
-        </details>
+        ) : null}
       </div>
     </div>
   );

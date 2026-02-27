@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { resolvePresetUniformValues } from "../src/core/parser/uniformState";
+import { resolvePresetUniformValues, sanitizeUniformValue } from "../src/core/parser/uniformState";
 import type { ParsedPreset, UniformDefinition } from "../src/core/parser/types";
 
 const TEST_UNIFORMS: UniformDefinition[] = [
@@ -71,5 +71,27 @@ describe("uniformState.resolvePresetUniformValues", () => {
     expect(values.Eye).toEqual([0, 0, -6]);
     expect(values.Target).toEqual([0, 0, 0]);
     expect(values.Power).toBe(8);
+  });
+
+  test("normalizes direction controls when applying values", () => {
+    const directionUniform: UniformDefinition = {
+      name: "Up",
+      type: "vec3",
+      control: "direction",
+      group: "Camera",
+      min: [-1, -1, -1],
+      max: [1, 1, 1],
+      defaultValue: [0, 1, 0],
+      lockType: "notlockable",
+      tooltip: ""
+    };
+
+    const sanitized = sanitizeUniformValue(directionUniform, [1, 1, 0]);
+    expect(Array.isArray(sanitized)).toBe(true);
+    if (Array.isArray(sanitized)) {
+      expect(sanitized[0]).toBeCloseTo(Math.SQRT1_2, 12);
+      expect(sanitized[1]).toBeCloseTo(Math.SQRT1_2, 12);
+      expect(sanitized[2]).toBeCloseTo(0, 12);
+    }
   });
 });

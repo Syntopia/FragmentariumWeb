@@ -21,6 +21,7 @@ float DE(vec3 p) {
     expect(sources.fragmentSource).toContain("#undef PI");
     expect(sources.fragmentSource).toContain("float DE(vec3 p);");
     expect(sources.fragmentSource).toContain("vec3 baseColor(vec3 p, vec3 n);");
+    expect(sources.fragmentSource).toContain("return vec3(1.0, 1.0, 1.0);");
     expect(sources.fragmentSource).toContain("return length(p) - (PI * 0.1);");
     expect(sources.fragmentSource).toContain("void fragmentariumWebInitGlobalsImpl() {}");
     expect(sources.fragmentSource).toContain("fragmentariumWebInitGlobalsImpl();");
@@ -48,6 +49,24 @@ float DE(vec3 p) {
     expect(sources.fragmentSource).toContain("void init() {");
     expect(sources.fragmentSource).toContain("Legacy Fragmentarium systems often require init()");
     expect(sources.fragmentSource).toContain("  init();");
+  });
+
+  test("injects default baseColor when only a declaration exists", () => {
+    const integrator = getIntegratorById("de-raytracer");
+    const geometrySource = `
+vec3 baseColor(vec3 p, vec3 n);
+float DE(vec3 p) {
+  return length(p) - 1.0;
+}
+`;
+
+    const sources = buildSceneShaderSources({
+      geometrySource,
+      integrator
+    });
+
+    expect(sources.fragmentSource).toContain("vec3 baseColor(vec3 p, vec3 n);");
+    expect(sources.fragmentSource).toContain("return vec3(1.0, 1.0, 1.0);");
   });
 
   test("adds orbit-trap bridge without legacy palette uniforms", () => {
@@ -182,6 +201,7 @@ float DE(vec3 p) {
     expect(sources.fragmentSource).toContain("uniform int uIntegrator_slicePlaneKeepFarSide;");
     expect(sources.fragmentSource).toContain("uniform vec3 uSlicePlaneResolvedPoint;");
     expect(sources.fragmentSource).toContain("uniform vec3 uSlicePlaneResolvedNormal;");
+    expect(sources.fragmentSource).toContain("return vec3(1.0, 1.0, 1.0);");
     expect(sources.fragmentSource).toContain("vec2 uv = focusUv * 2.0 - 1.0;");
     expect(sources.fragmentSource).toContain("vec2 cameraCoord = uv * uFov;");
     expect(sources.fragmentSource).toContain("fragColor = vec4(hitDistance, 0.0, 0.0, 1.0);");

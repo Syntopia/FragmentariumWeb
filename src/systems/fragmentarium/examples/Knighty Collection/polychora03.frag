@@ -29,7 +29,7 @@ uniform float VRadius; slider[0,0.05,0.5]
 //segments radius 
 uniform float SRadius; slider[0,0.01,0.1]
 
-uniform vec3 RotVector; slider[(0,0,0),(1,1,1),(1,1,1)]
+uniform vec3 RotVector; direction[(1,0,0)]
 
 uniform float RotAngle; slider[0.00,0,180]
 

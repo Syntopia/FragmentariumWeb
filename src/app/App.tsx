@@ -5,11 +5,15 @@ import { BlockingTaskDialog } from "../components/BlockingTaskDialog";
 import { ColorPickerButton } from "../components/ColorPickerButton";
 import { ConfirmDiscardChangesDialog } from "../components/ConfirmDiscardChangesDialog";
 import { ConfirmDeleteLocalSystemDialog } from "../components/ConfirmDeleteLocalSystemDialog";
+import { DirectionTrackballControl } from "../components/DirectionTrackballControl";
 import { SaveLocalSystemDialog } from "../components/SaveLocalSystemDialog";
 import { ExportRenderDialog, type ExportRenderDialogProgress } from "../components/ExportRenderDialog";
 import { HelpDialog } from "../components/HelpDialog";
+import { HoverHelpLabel } from "../components/HoverHelpLabel";
 import { LegacyFragmentariumImportDialog } from "../components/LegacyFragmentariumImportDialog";
+import { TimelinePanel } from "../components/TimelinePanel";
 import { ToggleSwitch } from "../components/ToggleSwitch";
+import { UiIcon } from "../components/UiIcon";
 import {
   LOCAL_SESSION_GALLERY_ROOT_LABEL,
   SessionGalleryDialog,
@@ -58,6 +62,7 @@ import {
 } from "../utils/githubGallerySources";
 import { loadGitHubGallerySourceUrls, saveGitHubGallerySourceUrls } from "../utils/githubGallerySourceStore";
 import { makeUniqueSessionPath } from "../utils/sessionPathNaming";
+import { clampDirectionComponents, normalizeDirectionArray } from "../utils/direction";
 import {
   deleteSessionSnapshotRecord,
   listSessionSnapshotRecords,
@@ -72,13 +77,25 @@ import {
 } from "../utils/webcodecsWebmEncoder";
 import { buildZipStoreBlob, parseZipStore } from "../utils/zipStore";
 import {
-  applyInterpolationMode,
-  buildChangedCameraSummaries,
-  buildChangedUniformSummaries,
-  buildInterpolatedExportState,
   formatEtaSeconds,
   type ExportInterpolationMode
 } from "./exportInterpolation";
+import {
+  buildTimelineSnapshot,
+  captureTimelinePatch,
+  cloneTimelineState,
+  createTimelineKeyId,
+  createTimelineState,
+  evenlyDistributeTimelineKeyframes,
+  findNearestTimelineKeyframeId,
+  findTimelineKeyframe,
+  fitTimelineKeyframes,
+  interpolateTimelineSnapshotAt,
+  resolveTimelineKeyframeSnapshot,
+  updateTimelineActiveKeyPatch,
+  type SessionTimelineState
+} from "./timeline";
+import { buildTimelineGraphLines } from "./timelineGraph";
 import {
   buildIntegratorOptionRenderItems,
   colorTripletPatchFromHex,
@@ -91,6 +108,11 @@ import {
   supportsHdrColorTripletIntensity
 } from "./integratorColorTriplets";
 import { buildIntegratorPanelRenderItems } from "./integratorOptionLayout";
+import {
+  getBuiltinPaneControlHelpText,
+  getIntegratorColorTripletHelpText,
+  getIntegratorOptionHelpText
+} from "./builtinOptionHelp";
 import { selectPresetForActivation } from "./presetSelection";
 import {
   appendPresetBlockToSource,
@@ -110,6 +132,7 @@ import { getUniformGroupNames, normalizeUniformGroupName } from "./uniformGroups
 import buildVersion from "../../build-version.json";
 
 const MIN_PANE_WIDTH = 240;
+const TIMELINE_PANEL_HEIGHT_PX = 176;
 const EXPORT_STILL_TILE_THRESHOLD_PIXELS = 2048 * 2048;
 const EXPORT_STILL_TILE_SIZE = 1024;
 const DEFAULT_STARTUP_INTEGRATOR_ID = "de-pathtracer-physical";
@@ -139,6 +162,11 @@ const STATIC_RIGHT_PANE_TABS: VerticalTabItem[] = [
   { id: "integrator", label: "Raytracer" },
   { id: "render", label: "Render" },
   { id: "post", label: "Post" }
+];
+const INTEGRATOR_MODE_TILES: Array<{ id: string; label: string }> = [
+  { id: "fast-raymarch", label: "Preview" },
+  { id: "de-raytracer", label: "Raytrace" },
+  { id: "de-pathtracer-physical", label: "Pathtrace" }
 ];
 const UNIFORM_GROUP_TAB_PREFIX = "uniform-group:";
 type RightPaneTabId = string;
@@ -175,8 +203,18 @@ interface InitialState {
   uniformValuesBySystem: Record<string, Record<string, UniformValue>>;
   cameraBySystem: Record<string, CameraState>;
   slicePlaneLockFrameBySystem: Record<string, SlicePlaneLockFrame | null>;
+  timelineBySystem: Record<string, SessionTimelineState>;
   renderSettings: RenderSettings;
   persistenceError: string | null;
+}
+
+interface TimelinePlaybackConfig {
+  systemKey: string;
+  startT: number;
+  startTimeMs: number;
+  durationSeconds: number;
+  timeline: SessionTimelineState;
+  uniforms: UniformDefinition[];
 }
 
 interface LegacyPersistedState {
@@ -241,10 +279,6 @@ interface ExportDialogState {
   aspectRatio: number;
   subframes: number;
   frameCount: number;
-  startPresetName: string | null;
-  endPresetName: string | null;
-  interpolation: ExportInterpolationMode;
-  previewFrame: number;
   movieCodec: WebCodecsMovieCodec;
   movieFps: number;
   movieBitrateMbps: number;
@@ -253,18 +287,6 @@ interface ExportDialogState {
 }
 
 interface ExportProgressState extends ExportRenderDialogProgress {}
-
-interface ExportPreviewSnapshot {
-  systemKey: string;
-  uniformValues: Record<string, UniformValue>;
-  camera: CameraState;
-}
-
-interface ResolvedPresetExportState {
-  presetName: string;
-  uniformValues: Record<string, UniformValue>;
-  camera: CameraState;
-}
 
 interface ErrorStripPreview {
   text: string;
@@ -356,38 +378,6 @@ function buildErrorStripPreview(message: string): ErrorStripPreview {
   }
 
   return { text: preview, truncated };
-}
-
-function resolvePresetExportState(
-  parseResult: ParseResult,
-  presetName: string,
-  fallbackCamera: CameraState
-): ResolvedPresetExportState | null {
-  const preset = findPresetByPath(parseResult, presetName);
-  if (preset === null) {
-    return null;
-  }
-  const uniformValues = resolvePresetUniformValues(parseResult.uniforms, parseResult.presets, preset.name);
-  const camera = deriveCameraFromUniformValues(parseResult.uniforms, uniformValues, fallbackCamera);
-  return {
-    presetName,
-    uniformValues,
-    camera
-  };
-}
-
-function findAlternatePresetName(presetNames: string[], preferred: string | null): string | null {
-  if (presetNames.length === 0) {
-    return null;
-  }
-  if (preferred !== null) {
-    for (const name of presetNames) {
-      if (name !== preferred) {
-        return name;
-      }
-    }
-  }
-  return presetNames[0] ?? null;
 }
 
 function sanitizeFileStem(input: string): string {
@@ -492,10 +482,10 @@ function parseEmbeddedSessionPayloadFromPngBytes(pngBytes: Uint8Array): Settings
   return parseSettingsClipboardPayload(embeddedSessionJson);
 }
 
-function requireEmbeddedSystemSource(payload: SettingsClipboardPayload, sourceLabel: string): string {
+function requireEmbeddedFragmentSource(payload: SettingsClipboardPayload, sourceLabel: string): string {
   const source = payload.systemDefinition?.source;
   if (typeof source !== "string" || source.length === 0) {
-    throw new Error(`${sourceLabel} is missing embedded system source.`);
+    throw new Error(`${sourceLabel} is missing embedded fragment source.`);
   }
   return source;
 }
@@ -710,6 +700,7 @@ function buildInitialState(): InitialState {
     uniformValuesBySystem: {},
     cameraBySystem: {},
     slicePlaneLockFrameBySystem: {},
+    timelineBySystem: {},
     renderSettings: { ...DEFAULT_RENDER_SETTINGS },
     persistenceError: null
   };
@@ -812,6 +803,21 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function resolveDirectionTripletValues(
+  options: IntegratorOptionValues,
+  xOption: IntegratorOptionDefinition,
+  yOption: IntegratorOptionDefinition,
+  zOption: IntegratorOptionDefinition,
+  label: string
+): [number, number, number] {
+  const clamped = [
+    clamp(options[xOption.key] ?? xOption.defaultValue, xOption.min, xOption.max),
+    clamp(options[yOption.key] ?? yOption.defaultValue, yOption.min, yOption.max),
+    clamp(options[zOption.key] ?? zOption.defaultValue, zOption.min, zOption.max)
+  ] as const;
+  return normalizeDirectionArray(clamped, `${label} direction`);
+}
+
 function normalizeIntegratorId(rawId: string | undefined): string {
   const fallbackIntegratorId = INTEGRATORS.some((integrator) => integrator.id === DEFAULT_STARTUP_INTEGRATOR_ID)
     ? DEFAULT_STARTUP_INTEGRATOR_ID
@@ -841,10 +847,10 @@ function normalizeIntegratorOptionsById(
     if (!INTEGRATORS.some((integrator) => integrator.id === normalizedId)) {
       continue;
     }
-    next[normalizedId] = {
+    next[normalizedId] = coerceIntegratorOptionsForId(normalizedId, {
       ...next[normalizedId],
       ...options
-    };
+    });
   }
 
   return next;
@@ -903,7 +909,7 @@ function getSourceName(entryKey: string): string {
     const safe = localPath.replaceAll(/[^A-Za-z0-9/_-]+/g, "_");
     return `session/${safe}.frag`;
   }
-  return "system.frag";
+  return "fragment.frag";
 }
 
 function findIncludeDirectiveLine(source: string, includePath: string): number | null {
@@ -1057,8 +1063,11 @@ export function App(): JSX.Element {
   const [slicePlaneLockFrameBySystem, setSlicePlaneLockFrameBySystem] = useState(
     initial.slicePlaneLockFrameBySystem
   );
+  const [timelineBySystem, setTimelineBySystem] = useState(initial.timelineBySystem);
   const [integratorOptionsById, setIntegratorOptionsById] = useState(initial.integratorOptionsById);
   const [renderSettings, setRenderSettings] = useState(initial.renderSettings);
+  const [timelineEnabled, setTimelineEnabled] = useState(false);
+  const [timelinePlaying, setTimelinePlaying] = useState(false);
   const [activeRightPaneTab, setActiveRightPaneTab] = useState<RightPaneTabId>("integrator");
   const [errorClipboardStatus, setErrorClipboardStatus] = useState<string | null>(null);
   const [toastNotifications, setToastNotifications] = useState<ToastNotification[]>([]);
@@ -1068,6 +1077,7 @@ export function App(): JSX.Element {
   const [pendingSessionPngImport, setPendingSessionPngImport] = useState<PendingSessionPngImportState | null>(null);
   const [dropImportOverlayVisible, setDropImportOverlayVisible] = useState(false);
   const [definitionActionsOpen, setDefinitionActionsOpen] = useState(false);
+  const [definitionPresetSubmenuOpen, setDefinitionPresetSubmenuOpen] = useState(false);
   const [settingsCopyActionsOpen, setSettingsCopyActionsOpen] = useState(false);
   const [sessionPngExportInProgress, setSessionPngExportInProgress] = useState(false);
   const [sessionGalleryOpen, setSessionGalleryOpen] = useState(false);
@@ -1096,7 +1106,10 @@ export function App(): JSX.Element {
   const definitionActionsRef = useRef<HTMLDivElement>(null);
   const settingsCopyActionsRef = useRef<HTMLDivElement>(null);
   const exportAbortControllerRef = useRef<AbortController | null>(null);
-  const exportPreviewSnapshotRef = useRef<ExportPreviewSnapshot | null>(null);
+  const timelineApplyInProgressRef = useRef(false);
+  const timelineScrubInProgressRef = useRef(false);
+  const timelinePlaybackRafRef = useRef<number | null>(null);
+  const timelinePlaybackConfigRef = useRef<TimelinePlaybackConfig | null>(null);
   const fileDragDepthRef = useRef(0);
 
   const [parsedBySystem, setParsedBySystem] = useState<Record<string, ParseResult>>({});
@@ -1228,6 +1241,32 @@ export function App(): JSX.Element {
 
   const cameraState = cameraBySystem[selectedSystemKey] ?? defaultCamera;
   const slicePlaneLockFrame = slicePlaneLockFrameBySystem[selectedSystemKey] ?? null;
+  const selectedTimeline = timelineBySystem[selectedSystemKey] ?? null;
+  const timelineSnapshot = useMemo(
+    () =>
+      buildTimelineSnapshot({
+        integratorId: activeIntegratorId,
+        integratorOptions: activeIntegratorOptions,
+        renderSettings,
+        uniformValues,
+        camera: cameraState,
+        slicePlaneLockFrame
+      }),
+    [activeIntegratorId, activeIntegratorOptions, cameraState, renderSettings, slicePlaneLockFrame, uniformValues]
+  );
+  const timelineHasAnimation = selectedTimeline !== null && selectedTimeline.keyframes.length > 1;
+  const timelineGraphLines = useMemo(
+    () =>
+      selectedTimeline === null || parseResult === null
+        ? []
+        : buildTimelineGraphLines({
+            timeline: selectedTimeline,
+            uniformDefinitions: parseResult.uniforms,
+            sampleCount: 120,
+            maxLines: 24
+          }),
+    [parseResult, selectedTimeline]
+  );
   const hasSourceChanges = sourceDraft !== baselineSource;
   const isEditingLocalSystem = selectedLocalPath !== null;
   const saveDialogNormalizedPath =
@@ -1348,6 +1387,7 @@ export function App(): JSX.Element {
           uniformValues,
           camera: cameraState,
           slicePlaneLockFrame,
+          timeline: selectedTimeline === null ? null : cloneTimelineState(selectedTimeline),
           systemDefinition: {
             source: sourceDraft,
             treePath: selectedSystemTreePath,
@@ -1367,6 +1407,7 @@ export function App(): JSX.Element {
       selectedSystemSourcePath,
       selectedSystemTreePath,
       sourceDraft,
+      selectedTimeline,
       uniformValues
     ]
   );
@@ -1379,71 +1420,7 @@ export function App(): JSX.Element {
   const canUpdateCurrentSession = isEditingLocalSystem && hasSessionChanges;
   const webCodecsMovieAvailable = isWebCodecsMovieExportAvailable();
 
-  const exportPresetNames = parseResult?.presets.map((preset) => preset.name) ?? [];
-  const exportPreviewSnapshot =
-    exportPreviewSnapshotRef.current !== null && exportPreviewSnapshotRef.current.systemKey === selectedSystemKey
-      ? exportPreviewSnapshotRef.current
-      : null;
-  const exportFallbackCamera = exportPreviewSnapshot?.camera ?? cameraState;
-
-  const exportStartPresetState = useMemo(
-    () =>
-      exportDialogState !== null &&
-      parseResult !== null &&
-      exportDialogState.startPresetName !== null
-        ? resolvePresetExportState(parseResult, exportDialogState.startPresetName, exportFallbackCamera)
-        : null,
-    [exportDialogState, exportFallbackCamera, parseResult]
-  );
-
-  const exportEndPresetState = useMemo(
-    () =>
-      exportDialogState !== null &&
-      parseResult !== null &&
-      exportDialogState.endPresetName !== null
-        ? resolvePresetExportState(parseResult, exportDialogState.endPresetName, exportFallbackCamera)
-        : null,
-    [exportDialogState, exportFallbackCamera, parseResult]
-  );
-
-  const exportChangedValues = useMemo(() => {
-    if (parseResult === null || exportStartPresetState === null || exportEndPresetState === null) {
-      return [];
-    }
-    return [
-      ...buildChangedCameraSummaries(exportStartPresetState.camera, exportEndPresetState.camera),
-      ...buildChangedUniformSummaries(
-        parseResult.uniforms,
-        exportStartPresetState.uniformValues,
-        exportEndPresetState.uniformValues
-      )
-    ];
-  }, [exportEndPresetState, exportStartPresetState, parseResult]);
-
-  const exportPreviewState = useMemo(() => {
-    if (
-      exportDialogState === null ||
-      exportDialogState.mode !== "animation" ||
-      parseResult === null ||
-      exportStartPresetState === null ||
-      exportEndPresetState === null
-    ) {
-      return null;
-    }
-
-    return buildInterpolatedExportState({
-      frameIndex: exportDialogState.previewFrame,
-      frameCount: exportDialogState.frameCount,
-      interpolation: exportDialogState.interpolation,
-      uniformDefinitions: parseResult.uniforms,
-      startUniformValues: exportStartPresetState.uniformValues,
-      endUniformValues: exportEndPresetState.uniformValues,
-      startCamera: exportStartPresetState.camera,
-      endCamera: exportEndPresetState.camera
-    });
-  }, [exportDialogState, exportEndPresetState, exportStartPresetState, parseResult]);
-
-  const compileSystem = useCallback(
+  const compileFragment = useCallback(
     (entryKey: string): void => {
       const source = editorSourceBySystem[entryKey] ?? getBaselineSourceForEntry(entryKey, localSystemsByPath);
 
@@ -1485,15 +1462,22 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (parsedBySystem[selectedSystemKey] === undefined) {
-      compileSystem(selectedSystemKey);
+      compileFragment(selectedSystemKey);
     }
-  }, [compileSystem, parsedBySystem, selectedSystemKey]);
+  }, [compileFragment, parsedBySystem, selectedSystemKey]);
 
   useEffect(() => {
     setEditorJumpRequest(null);
     setDefinitionActionsOpen(false);
+    setDefinitionPresetSubmenuOpen(false);
     setSettingsCopyActionsOpen(false);
   }, [selectedSystemKey]);
+
+  useEffect(() => {
+    if (!definitionActionsOpen) {
+      setDefinitionPresetSubmenuOpen(false);
+    }
+  }, [definitionActionsOpen]);
 
   useEffect(() => {
     if (!definitionActionsOpen) {
@@ -1660,28 +1644,94 @@ export function App(): JSX.Element {
       toastTimeoutIdsRef.current = [];
       exportAbortControllerRef.current?.abort();
       exportAbortControllerRef.current = null;
+      if (timelinePlaybackRafRef.current !== null) {
+        window.cancelAnimationFrame(timelinePlaybackRafRef.current);
+        timelinePlaybackRafRef.current = null;
+      }
+      timelinePlaybackConfigRef.current = null;
     };
   }, []);
 
+  const applyTimelineSnapshotToSelectedSystem = useCallback(
+    (snapshot: ReturnType<typeof buildTimelineSnapshot>): void => {
+      timelineApplyInProgressRef.current = true;
+
+      const nextIntegratorId = normalizeIntegratorId(snapshot.integratorId);
+      setActiveIntegratorId(nextIntegratorId);
+      setIntegratorOptionsById((prev) => ({
+        ...prev,
+        [nextIntegratorId]: { ...snapshot.integratorOptions }
+      }));
+      setRenderSettings({ ...snapshot.renderSettings });
+      setSlicePlaneLockFrameBySystem((prev) => ({
+        ...prev,
+        [selectedSystemKey]:
+          snapshot.slicePlaneLockFrame === null ? null : cloneSlicePlaneLockFrame(snapshot.slicePlaneLockFrame)
+      }));
+
+      if (parseResult !== null) {
+        const nextUniformValues = coerceUniformValues(parseResult.uniforms, snapshot.uniformValues);
+        const nextCamera = deriveCameraFromUniformValues(parseResult.uniforms, nextUniformValues, snapshot.camera);
+        setUniformValuesBySystem((prev) => ({
+          ...prev,
+          [selectedSystemKey]: nextUniformValues
+        }));
+        setCameraBySystem((prev) => ({
+          ...prev,
+          [selectedSystemKey]: nextCamera
+        }));
+      } else {
+        setUniformValuesBySystem((prev) => ({
+          ...prev,
+          [selectedSystemKey]: cloneUniformValueMap(snapshot.uniformValues)
+        }));
+        setCameraBySystem((prev) => ({
+          ...prev,
+          [selectedSystemKey]: cloneCameraState(snapshot.camera)
+        }));
+      }
+
+      queueMicrotask(() => {
+        timelineApplyInProgressRef.current = false;
+      });
+    },
+    [parseResult, selectedSystemKey]
+  );
+
   useEffect(() => {
-    if (
-      exportDialogState === null ||
-      exportDialogState.mode !== "animation" ||
-      exportPreviewState === null ||
-      exportProgressState !== null
-    ) {
+    if (!timelineEnabled) {
       return;
     }
+    setTimelineBySystem((prev) => {
+      if (prev[selectedSystemKey] !== undefined) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [selectedSystemKey]: createTimelineState(timelineSnapshot)
+      };
+    });
+  }, [selectedSystemKey, timelineEnabled, timelineSnapshot]);
 
-    setUniformValuesBySystem((prev) => ({
-      ...prev,
-      [selectedSystemKey]: cloneUniformValueMap(exportPreviewState.uniformValues)
-    }));
-    setCameraBySystem((prev) => ({
-      ...prev,
-      [selectedSystemKey]: cloneCameraState(exportPreviewState.camera)
-    }));
-  }, [exportDialogState, exportPreviewState, exportProgressState, selectedSystemKey]);
+  useEffect(() => {
+    if (!timelineEnabled || timelineApplyInProgressRef.current || timelineScrubInProgressRef.current) {
+      return;
+    }
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined) {
+        return prev;
+      }
+      const nextTimeline = updateTimelineActiveKeyPatch(timeline, timelineSnapshot);
+      if (nextTimeline === timeline) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [selectedSystemKey]: nextTimeline
+      };
+    });
+  }, [selectedSystemKey, timelineEnabled, timelineSnapshot]);
 
   const pushToast = useCallback((message: string, tone: "info" | "error" = "info"): void => {
     const id = nextToastIdRef.current;
@@ -1863,6 +1913,7 @@ export function App(): JSX.Element {
     const nextLocalSnapshotsByPath: Record<string, LocalSessionSnapshotState> = {};
     const nextLocalEditorSourceByKey: Record<string, string> = {};
     const nextLocalSliceLockByKey: Record<string, SlicePlaneLockFrame | null> = {};
+    const nextLocalTimelineByKey: Record<string, SessionTimelineState> = {};
 
     for (const snapshot of decodedSnapshots) {
       nextLocalSystemsByPath[snapshot.path] = snapshot.source;
@@ -1877,6 +1928,9 @@ export function App(): JSX.Element {
       if (snapshot.payload.slicePlaneLockFrame !== undefined) {
         nextLocalSliceLockByKey[entryKey] =
           snapshot.payload.slicePlaneLockFrame === null ? null : cloneSlicePlaneLockFrame(snapshot.payload.slicePlaneLockFrame);
+      }
+      if (snapshot.payload.timeline !== undefined && snapshot.payload.timeline !== null) {
+        nextLocalTimelineByKey[entryKey] = cloneTimelineState(snapshot.payload.timeline);
       }
     }
 
@@ -1907,6 +1961,19 @@ export function App(): JSX.Element {
       return {
         ...next,
         ...nextLocalSliceLockByKey
+      };
+    });
+    setTimelineBySystem((prev) => {
+      const next: Record<string, SessionTimelineState> = {};
+      for (const [entryKey, timeline] of Object.entries(prev)) {
+        if (parseLocalPathFromKey(entryKey) !== null) {
+          continue;
+        }
+        next[entryKey] = timeline;
+      }
+      return {
+        ...next,
+        ...nextLocalTimelineByKey
       };
     });
   }, []);
@@ -1959,6 +2026,18 @@ export function App(): JSX.Element {
       }
       return next;
     });
+    setTimelineBySystem((prev) => {
+      const next = { ...prev };
+      for (const snapshot of decodedSnapshots) {
+        const entryKey = makeLocalEntryKey(snapshot.path);
+        if (snapshot.payload.timeline === undefined || snapshot.payload.timeline === null) {
+          delete next[entryKey];
+          continue;
+        }
+        next[entryKey] = cloneTimelineState(snapshot.payload.timeline);
+      }
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -1973,7 +2052,7 @@ export function App(): JSX.Element {
           try {
             const pngBytes = await blobToUint8Array(record.pngBlob);
             const payload = parseEmbeddedSessionPayloadFromPngBytes(pngBytes);
-            const source = requireEmbeddedSystemSource(payload, `Session snapshot '${record.path}'`);
+            const source = requireEmbeddedFragmentSource(payload, `Session snapshot '${record.path}'`);
             decodedSnapshots.push({
               path: record.path,
               payload,
@@ -2469,37 +2548,458 @@ export function App(): JSX.Element {
     console.info(`[app] Reset session settings to defaults for '${selectedSystemKey}'.`);
   };
 
-  const restoreExportPreviewSnapshot = useCallback((): void => {
-    const snapshot = exportPreviewSnapshotRef.current;
-    if (snapshot === null) {
+  const onTimelineToggle = (enabled: boolean): void => {
+    setTimelinePlaying(false);
+    setTimelineEnabled(enabled);
+    if (!enabled) {
+      timelineScrubInProgressRef.current = false;
       return;
     }
-    exportPreviewSnapshotRef.current = null;
-    setUniformValuesBySystem((prev) => ({
-      ...prev,
-      [snapshot.systemKey]: cloneUniformValueMap(snapshot.uniformValues)
-    }));
-    setCameraBySystem((prev) => ({
-      ...prev,
-      [snapshot.systemKey]: cloneCameraState(snapshot.camera)
-    }));
-  }, []);
+    setTimelineBySystem((prev) => {
+      if (prev[selectedSystemKey] !== undefined) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [selectedSystemKey]: createTimelineState(timelineSnapshot)
+      };
+    });
+  };
+
+  const onTimelinePlaybackDurationChange = (secondsRaw: number): void => {
+    const seconds = Number.isFinite(secondsRaw) ? Math.max(0.1, secondsRaw) : 0.1;
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined || Math.abs(timeline.playbackDurationSeconds - seconds) <= 1e-6) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [selectedSystemKey]: {
+          ...timeline,
+          playbackDurationSeconds: seconds
+        }
+      };
+    });
+  };
+
+  const commitTimelinePreviewToNearestKey = useCallback((tRaw: number): void => {
+    const t = Math.max(0, Math.min(1, tRaw));
+    let snapshotToApply: ReturnType<typeof buildTimelineSnapshot> | null = null;
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined) {
+        return prev;
+      }
+      const nearestId = findNearestTimelineKeyframeId(timeline.keyframes, t);
+      if (nearestId === null) {
+        return prev;
+      }
+      const keyframe = timeline.keyframes.find((entry) => entry.id === nearestId);
+      if (keyframe === undefined) {
+        return prev;
+      }
+      const nextTimeline: SessionTimelineState = {
+        ...timeline,
+        activeKeyId: nearestId,
+        playheadT: keyframe.t
+      };
+      snapshotToApply = resolveTimelineKeyframeSnapshot(nextTimeline, nearestId);
+      return {
+        ...prev,
+        [selectedSystemKey]: nextTimeline
+      };
+    });
+    if (snapshotToApply !== null) {
+      applyTimelineSnapshotToSelectedSystem(snapshotToApply);
+    }
+    timelineScrubInProgressRef.current = false;
+  }, [applyTimelineSnapshotToSelectedSystem, selectedSystemKey]);
+
+  const onTimelinePlay = (): void => {
+    if (parseResult === null) {
+      return;
+    }
+    const timeline = timelineBySystem[selectedSystemKey];
+    if (timeline === undefined) {
+      return;
+    }
+    const rewoundT = 0;
+    const rewoundSnapshot = interpolateTimelineSnapshotAt(timeline, rewoundT, parseResult.uniforms);
+    setTimelineBySystem((prev) => {
+      const current = prev[selectedSystemKey];
+      if (current === undefined || Math.abs(current.playheadT - rewoundT) <= 1e-6) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [selectedSystemKey]: {
+          ...current,
+          playheadT: rewoundT
+        }
+      };
+    });
+    applyTimelineSnapshotToSelectedSystem(rewoundSnapshot);
+    timelineScrubInProgressRef.current = true;
+    timelinePlaybackConfigRef.current = {
+      systemKey: selectedSystemKey,
+      startT: rewoundT,
+      startTimeMs: performance.now(),
+      durationSeconds: Math.max(0.1, timeline.playbackDurationSeconds),
+      timeline: cloneTimelineState(timeline),
+      uniforms: parseResult.uniforms
+    };
+    setTimelinePlaying(true);
+  };
+
+  const onTimelinePause = (): void => {
+    setTimelinePlaying(false);
+    const currentTimeline = timelineBySystem[selectedSystemKey];
+    const currentT = currentTimeline?.playheadT ?? 0;
+    commitTimelinePreviewToNearestKey(currentT);
+  };
+
+  const onTimelineStepKeyframe = (direction: "prev" | "next"): void => {
+    setTimelinePlaying(false);
+    let snapshotToApply: ReturnType<typeof buildTimelineSnapshot> | null = null;
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined || timeline.keyframes.length <= 1) {
+        return prev;
+      }
+      const sorted = [...timeline.keyframes].sort((a, b) => {
+        if (Math.abs(a.t - b.t) > 1e-6) {
+          return a.t - b.t;
+        }
+        return a.id.localeCompare(b.id);
+      });
+      const currentIndex = sorted.findIndex((entry) => entry.id === timeline.activeKeyId);
+      if (currentIndex < 0) {
+        return prev;
+      }
+      const nextIndex = direction === "prev" ? currentIndex - 1 : currentIndex + 1;
+      if (nextIndex < 0 || nextIndex >= sorted.length) {
+        return prev;
+      }
+      const keyframe = sorted[nextIndex];
+      const nextTimeline: SessionTimelineState = {
+        ...timeline,
+        activeKeyId: keyframe.id,
+        playheadT: keyframe.t
+      };
+      snapshotToApply = resolveTimelineKeyframeSnapshot(nextTimeline, keyframe.id);
+      return {
+        ...prev,
+        [selectedSystemKey]: nextTimeline
+      };
+    });
+    if (snapshotToApply !== null) {
+      applyTimelineSnapshotToSelectedSystem(snapshotToApply);
+    }
+  };
+
+  const onTimelineInterpolationChange = (mode: ExportInterpolationMode): void => {
+    setTimelinePlaying(false);
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined || timeline.interpolation === mode) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [selectedSystemKey]: {
+          ...timeline,
+          interpolation: mode
+        }
+      };
+    });
+  };
+
+  const onTimelineAddKeyframe = (side: "left" | "right"): void => {
+    setTimelinePlaying(false);
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined) {
+        return prev;
+      }
+      const active = findTimelineKeyframe(timeline, timeline.activeKeyId);
+      if (active === null) {
+        return prev;
+      }
+      const sorted = [...timeline.keyframes].sort((a, b) => a.t - b.t);
+      const activeIndex = sorted.findIndex((entry) => entry.id === active.id);
+      if (activeIndex < 0) {
+        return prev;
+      }
+      const prevKey = activeIndex > 0 ? sorted[activeIndex - 1] : null;
+      const nextKey = activeIndex < sorted.length - 1 ? sorted[activeIndex + 1] : null;
+      let nextT = 0.5;
+      if (side === "left") {
+        nextT = prevKey !== null ? (prevKey.t + active.t) * 0.5 : active.t - 0.2;
+      } else {
+        nextT = nextKey !== null ? (nextKey.t + active.t) * 0.5 : active.t + 0.2;
+      }
+      const keyId = createTimelineKeyId();
+      const patch = captureTimelinePatch(timelineSnapshot, timeline.baseline);
+      const fit = fitTimelineKeyframes([...timeline.keyframes, { id: keyId, t: nextT, patch }]);
+      const inserted = fit.find((entry) => entry.id === keyId);
+      if (inserted === undefined) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [selectedSystemKey]: {
+          ...timeline,
+          keyframes: fit,
+          activeKeyId: keyId,
+          playheadT: inserted.t
+        }
+      };
+    });
+  };
+
+  const onTimelineDeleteActiveKey = (): void => {
+    setTimelinePlaying(false);
+    let snapshotToApply: ReturnType<typeof buildTimelineSnapshot> | null = null;
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined || timeline.keyframes.length <= 1) {
+        return prev;
+      }
+      const nextKeyframes = fitTimelineKeyframes(timeline.keyframes.filter((entry) => entry.id !== timeline.activeKeyId));
+      if (nextKeyframes.length === 0) {
+        return prev;
+      }
+      const nearestId = findNearestTimelineKeyframeId(nextKeyframes, timeline.playheadT) ?? nextKeyframes[0].id;
+      const nearest = nextKeyframes.find((entry) => entry.id === nearestId) ?? nextKeyframes[0];
+      const nextTimeline: SessionTimelineState = {
+        ...timeline,
+        keyframes: nextKeyframes,
+        activeKeyId: nearest.id,
+        playheadT: nearest.t
+      };
+      snapshotToApply = resolveTimelineKeyframeSnapshot(nextTimeline, nearest.id);
+      return {
+        ...prev,
+        [selectedSystemKey]: nextTimeline
+      };
+    });
+    if (snapshotToApply !== null) {
+      applyTimelineSnapshotToSelectedSystem(snapshotToApply);
+    }
+  };
+
+  const onTimelineFit = (): void => {
+    setTimelinePlaying(false);
+    let changed = false;
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined || timeline.keyframes.length <= 1) {
+        return prev;
+      }
+      const fit = evenlyDistributeTimelineKeyframes(timeline.keyframes);
+      const originalById = new Map(timeline.keyframes.map((entry) => [entry.id, entry.t]));
+      changed = fit.some((entry) => {
+        const before = originalById.get(entry.id);
+        if (before === undefined) {
+          return true;
+        }
+        return Math.abs(before - entry.t) > 1e-6;
+      });
+      if (!changed) {
+        return prev;
+      }
+      const active = fit.find((entry) => entry.id === timeline.activeKeyId);
+      return {
+        ...prev,
+        [selectedSystemKey]: {
+          ...timeline,
+          keyframes: fit,
+          playheadT: active?.t ?? timeline.playheadT
+        }
+      };
+    });
+    if (!changed) {
+      pushToast("Keyframes are already evenly spaced.");
+    }
+  };
+
+  const onTimelineActivateKeyframe = (keyId: string): void => {
+    setTimelinePlaying(false);
+    let snapshotToApply: ReturnType<typeof buildTimelineSnapshot> | null = null;
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined) {
+        return prev;
+      }
+      const keyframe = timeline.keyframes.find((entry) => entry.id === keyId);
+      if (keyframe === undefined) {
+        return prev;
+      }
+      const nextTimeline: SessionTimelineState = {
+        ...timeline,
+        activeKeyId: keyId,
+        playheadT: keyframe.t
+      };
+      snapshotToApply = resolveTimelineKeyframeSnapshot(nextTimeline, keyId);
+      return {
+        ...prev,
+        [selectedSystemKey]: nextTimeline
+      };
+    });
+    if (snapshotToApply !== null) {
+      applyTimelineSnapshotToSelectedSystem(snapshotToApply);
+    }
+  };
+
+  const onTimelineMoveKeyframe = (keyId: string, tRaw: number): void => {
+    setTimelinePlaying(false);
+    const t = Math.max(0, Math.min(1, tRaw));
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined) {
+        return prev;
+      }
+      const moved = timeline.keyframes.map((entry) => (entry.id === keyId ? { ...entry, t } : entry));
+      const fit = fitTimelineKeyframes(moved);
+      const active = fit.find((entry) => entry.id === timeline.activeKeyId);
+      return {
+        ...prev,
+        [selectedSystemKey]: {
+          ...timeline,
+          keyframes: fit,
+          playheadT: active?.t ?? timeline.playheadT
+        }
+      };
+    });
+  };
+
+  const onTimelineMoveKeyframeEnd = (keyId: string, tRaw: number): void => {
+    setTimelinePlaying(false);
+    const t = Math.max(0, Math.min(1, tRaw));
+    let snapshotToApply: ReturnType<typeof buildTimelineSnapshot> | null = null;
+    setTimelineBySystem((prev) => {
+      const timeline = prev[selectedSystemKey];
+      if (timeline === undefined) {
+        return prev;
+      }
+      const moved = timeline.keyframes.map((entry) => (entry.id === keyId ? { ...entry, t } : entry));
+      const fit = fitTimelineKeyframes(moved);
+      const keyframe = fit.find((entry) => entry.id === keyId);
+      if (keyframe === undefined) {
+        return prev;
+      }
+      const nextTimeline: SessionTimelineState = {
+        ...timeline,
+        keyframes: fit,
+        activeKeyId: keyId,
+        playheadT: keyframe.t
+      };
+      snapshotToApply = resolveTimelineKeyframeSnapshot(nextTimeline, keyId);
+      return {
+        ...prev,
+        [selectedSystemKey]: nextTimeline
+      };
+    });
+    if (snapshotToApply !== null) {
+      applyTimelineSnapshotToSelectedSystem(snapshotToApply);
+    }
+  };
+
+  const onTimelineScrubPreview = (tRaw: number): void => {
+    setTimelinePlaying(false);
+    if (parseResult === null) {
+      return;
+    }
+    const timeline = timelineBySystem[selectedSystemKey];
+    if (timeline === undefined) {
+      return;
+    }
+    const t = Math.max(0, Math.min(1, tRaw));
+    timelineScrubInProgressRef.current = true;
+    setTimelineBySystem((prev) => {
+      const current = prev[selectedSystemKey];
+      if (current === undefined) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [selectedSystemKey]: {
+          ...current,
+          playheadT: t
+        }
+      };
+    });
+    const interpolated = interpolateTimelineSnapshotAt(timeline, t, parseResult.uniforms);
+    applyTimelineSnapshotToSelectedSystem(interpolated);
+  };
+
+  const onTimelineScrubCommit = (tRaw: number): void => {
+    setTimelinePlaying(false);
+    commitTimelinePreviewToNearestKey(tRaw);
+  };
+
+  useEffect(() => {
+    if (!timelinePlaying) {
+      if (timelinePlaybackRafRef.current !== null) {
+        window.cancelAnimationFrame(timelinePlaybackRafRef.current);
+        timelinePlaybackRafRef.current = null;
+      }
+      timelinePlaybackConfigRef.current = null;
+      return;
+    }
+
+    const stepPlayback = (nowMs: number): void => {
+      const config = timelinePlaybackConfigRef.current;
+      if (config === null || config.systemKey !== selectedSystemKey) {
+        timelineScrubInProgressRef.current = false;
+        setTimelinePlaying(false);
+        return;
+      }
+
+      const durationMs = Math.max(100, config.durationSeconds * 1000);
+      const elapsedMs = Math.max(0, nowMs - config.startTimeMs);
+      const nextT = Math.max(0, Math.min(1, config.startT + elapsedMs / durationMs));
+
+      setTimelineBySystem((prev) => {
+        const timeline = prev[config.systemKey];
+        if (timeline === undefined || Math.abs(timeline.playheadT - nextT) <= 1e-6) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [config.systemKey]: {
+            ...timeline,
+            playheadT: nextT
+          }
+        };
+      });
+
+      const interpolated = interpolateTimelineSnapshotAt(config.timeline, nextT, config.uniforms);
+      applyTimelineSnapshotToSelectedSystem(interpolated);
+
+      if (nextT >= 1 - 1e-6) {
+        setTimelinePlaying(false);
+        commitTimelinePreviewToNearestKey(1);
+        return;
+      }
+      timelinePlaybackRafRef.current = window.requestAnimationFrame(stepPlayback);
+    };
+
+    timelinePlaybackRafRef.current = window.requestAnimationFrame(stepPlayback);
+    return () => {
+      if (timelinePlaybackRafRef.current !== null) {
+        window.cancelAnimationFrame(timelinePlaybackRafRef.current);
+        timelinePlaybackRafRef.current = null;
+      }
+    };
+  }, [applyTimelineSnapshotToSelectedSystem, commitTimelinePreviewToNearestKey, selectedSystemKey, timelinePlaying]);
 
   const onOpenExportDialog = (): void => {
     if (parseResult === null) {
-      pushToast("Compile a system before exporting.", "error");
+      pushToast("Compile a fragment before exporting.", "error");
       return;
     }
-
-    exportPreviewSnapshotRef.current = {
-      systemKey: selectedSystemKey,
-      uniformValues: cloneUniformValueMap(uniformValues),
-      camera: cloneCameraState(cameraState)
-    };
-
-    const activePresetName = activePresetBySystem[selectedSystemKey] ?? parseResult.presets[0]?.name ?? null;
-    const startPresetName = activePresetName;
-    const endPresetName = findAlternatePresetName(parseResult.presets.map((preset) => preset.name), activePresetName);
     const estimatedWidth =
       status.resolution[0] > 1 && status.scale > 0.01 ? Math.round(status.resolution[0] / status.scale) : 1920;
     const estimatedHeight =
@@ -2520,10 +3020,6 @@ export function App(): JSX.Element {
       aspectRatio: exportAspectRatio,
       subframes: renderSettings.maxSubframes > 0 ? renderSettings.maxSubframes : 30,
       frameCount: 100,
-      startPresetName,
-      endPresetName,
-      interpolation: "linear",
-      previewFrame: 0,
       movieCodec: "vp9",
       movieFps: 30,
       movieBitrateMbps: 12,
@@ -2537,7 +3033,6 @@ export function App(): JSX.Element {
     if (exportProgressState !== null) {
       return;
     }
-    restoreExportPreviewSnapshot();
     setExportDialogState(null);
     setExportProgressState(null);
   };
@@ -2554,19 +3049,14 @@ export function App(): JSX.Element {
       return;
     }
     if (parseResult === null) {
-      updateExportDialogState({ statusMessage: "Cannot export movie: system is not compiled." });
+      updateExportDialogState({ statusMessage: "Cannot export movie: fragment is not compiled." });
       return;
     }
 
     const dialogSnapshot = { ...exportDialogState };
-    if (
-      dialogSnapshot.mode !== "animation" ||
-      exportStartPresetState === null ||
-      exportEndPresetState === null ||
-      dialogSnapshot.startPresetName === null ||
-      dialogSnapshot.endPresetName === null
-    ) {
-      updateExportDialogState({ statusMessage: "Movie export requires Animation mode and two presets." });
+    const timelineForExport = selectedTimeline === null ? null : cloneTimelineState(selectedTimeline);
+    if (dialogSnapshot.mode !== "animation" || timelineForExport === null || timelineForExport.keyframes.length < 2) {
+      updateExportDialogState({ statusMessage: "Movie export requires Timeline mode with at least two keyframes." });
       return;
     }
 
@@ -2624,8 +3114,12 @@ export function App(): JSX.Element {
         }
       });
 
+      const initialFrame = interpolateTimelineSnapshotAt(timelineForExport, 0, parseResult.uniforms);
+      let currentIntegratorId = normalizeIntegratorId(initialFrame.integratorId);
+      let currentIntegrator = getIntegratorById(currentIntegratorId);
+
       exportRenderer.setRenderSettings({
-        ...renderSettings,
+        ...initialFrame.renderSettings,
         interactionResolutionScale: 1,
         tileCount: 1,
         tilesPerFrame: 1,
@@ -2635,11 +3129,12 @@ export function App(): JSX.Element {
         geometrySource: parseResult.shaderSource,
         geometryLineMap: parseResult.shaderLineMap,
         uniformDefinitions: parseResult.uniforms,
-        uniformValues: uniformValues,
-        integrator: activeIntegrator,
-        integratorOptions: activeIntegratorOptions
+        uniformValues: initialFrame.uniformValues,
+        integrator: currentIntegrator,
+        integratorOptions: initialFrame.integratorOptions
       });
-      exportRenderer.updateSlicePlaneLockFrame(slicePlaneLockFrame);
+      exportRenderer.updateSlicePlaneLockFrame(initialFrame.slicePlaneLockFrame);
+      exportRenderer.setCamera(initialFrame.camera);
 
       movieEncoder = new WebCodecsWebmEncoder(
         {
@@ -2658,19 +3153,32 @@ export function App(): JSX.Element {
           throw createExportAbortErrorLocal();
         }
 
-        const interpolated = buildInterpolatedExportState({
-          frameIndex,
-          frameCount: totalFrames,
-          interpolation: dialogSnapshot.interpolation,
-          uniformDefinitions: parseResult.uniforms,
-          startUniformValues: exportStartPresetState.uniformValues,
-          endUniformValues: exportEndPresetState.uniformValues,
-          startCamera: exportStartPresetState.camera,
-          endCamera: exportEndPresetState.camera
+        const timelineT = totalFrames <= 1 ? 0 : frameIndex / Math.max(totalFrames - 1, 1);
+        const interpolated = interpolateTimelineSnapshotAt(timelineForExport, timelineT, parseResult.uniforms);
+        const nextIntegratorId = normalizeIntegratorId(interpolated.integratorId);
+        if (nextIntegratorId !== currentIntegratorId) {
+          currentIntegratorId = nextIntegratorId;
+          currentIntegrator = getIntegratorById(currentIntegratorId);
+          exportRenderer.setScene({
+            geometrySource: parseResult.shaderSource,
+            geometryLineMap: parseResult.shaderLineMap,
+            uniformDefinitions: parseResult.uniforms,
+            uniformValues: interpolated.uniformValues,
+            integrator: currentIntegrator,
+            integratorOptions: interpolated.integratorOptions
+          });
+        } else {
+          exportRenderer.updateIntegratorOptions(interpolated.integratorOptions);
+          exportRenderer.updateUniformValues(interpolated.uniformValues);
+        }
+        exportRenderer.setRenderSettings({
+          ...interpolated.renderSettings,
+          interactionResolutionScale: 1,
+          tileCount: 1,
+          tilesPerFrame: 1,
+          maxSubframes: Math.max(1, dialogSnapshot.subframes)
         });
-
-        exportRenderer.updateIntegratorOptions(activeIntegratorOptions);
-        exportRenderer.updateUniformValues(interpolated.uniformValues);
+        exportRenderer.updateSlicePlaneLockFrame(interpolated.slicePlaneLockFrame);
         exportRenderer.setCamera(interpolated.camera);
 
         await exportRenderer.renderStill({
@@ -2796,18 +3304,18 @@ export function App(): JSX.Element {
       return;
     }
     if (parseResult === null) {
-      updateExportDialogState({ statusMessage: "Cannot export: system is not compiled." });
+      updateExportDialogState({ statusMessage: "Cannot export: fragment is not compiled." });
       return;
     }
 
     const dialogSnapshot = { ...exportDialogState };
     const exportMode = dialogSnapshot.mode;
-    const canAnimate =
-      exportMode === "animation" &&
-      exportStartPresetState !== null &&
-      exportEndPresetState !== null &&
-      dialogSnapshot.startPresetName !== null &&
-      dialogSnapshot.endPresetName !== null;
+    const timelineForExport = selectedTimeline === null ? null : cloneTimelineState(selectedTimeline);
+    const canAnimate = exportMode === "animation" && timelineForExport !== null && timelineForExport.keyframes.length > 1;
+    if (exportMode === "animation" && !canAnimate) {
+      updateExportDialogState({ statusMessage: "Animation export requires Timeline mode with at least two keyframes." });
+      return;
+    }
 
     const abortController = new AbortController();
     exportAbortControllerRef.current = abortController;
@@ -2995,6 +3503,7 @@ export function App(): JSX.Element {
           uniformValues,
           camera: cameraState,
           slicePlaneLockFrame,
+          timeline: selectedTimeline === null ? null : cloneTimelineState(selectedTimeline),
           systemDefinition: {
             source: sourceDraft,
             treePath: selectedSystemTreePath,
@@ -3022,26 +3531,45 @@ export function App(): JSX.Element {
         return;
       }
 
+      const animationTimeline = timelineForExport;
+      if (animationTimeline === null) {
+        throw new Error("Animation timeline is unavailable.");
+      }
       const totalFrames = Math.max(1, dialogSnapshot.frameCount);
       const entries: Array<{ name: string; data: Uint8Array }> = [];
+      let currentIntegratorId = normalizeIntegratorId(activeIntegratorId);
+      let currentIntegrator = getIntegratorById(currentIntegratorId);
       for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
         if (abortController.signal.aborted) {
           throw new Error("Export cancelled.");
         }
 
-        const interpolated = buildInterpolatedExportState({
-          frameIndex,
-          frameCount: totalFrames,
-          interpolation: dialogSnapshot.interpolation,
-          uniformDefinitions: parseResult.uniforms,
-          startUniformValues: exportStartPresetState.uniformValues,
-          endUniformValues: exportEndPresetState.uniformValues,
-          startCamera: exportStartPresetState.camera,
-          endCamera: exportEndPresetState.camera
+        const timelineT = totalFrames <= 1 ? 0 : frameIndex / Math.max(totalFrames - 1, 1);
+        const interpolated = interpolateTimelineSnapshotAt(animationTimeline, timelineT, parseResult.uniforms);
+        const nextIntegratorId = normalizeIntegratorId(interpolated.integratorId);
+        if (nextIntegratorId !== currentIntegratorId) {
+          currentIntegratorId = nextIntegratorId;
+          currentIntegrator = getIntegratorById(currentIntegratorId);
+          exportRenderer.setScene({
+            geometrySource: parseResult.shaderSource,
+            geometryLineMap: parseResult.shaderLineMap,
+            uniformDefinitions: parseResult.uniforms,
+            uniformValues: interpolated.uniformValues,
+            integrator: currentIntegrator,
+            integratorOptions: interpolated.integratorOptions
+          });
+        } else {
+          exportRenderer.updateIntegratorOptions(interpolated.integratorOptions);
+          exportRenderer.updateUniformValues(interpolated.uniformValues);
+        }
+        exportRenderer.setRenderSettings({
+          ...interpolated.renderSettings,
+          interactionResolutionScale: 1,
+          tileCount: 1,
+          tilesPerFrame: 1,
+          maxSubframes: Math.max(1, dialogSnapshot.subframes)
         });
-
-        exportRenderer.updateIntegratorOptions(activeIntegratorOptions);
-        exportRenderer.updateUniformValues(interpolated.uniformValues);
+        exportRenderer.updateSlicePlaneLockFrame(interpolated.slicePlaneLockFrame);
         exportRenderer.setCamera(interpolated.camera);
 
         const pngBlob = await exportRenderer.renderStillToPngBlob({
@@ -3052,12 +3580,11 @@ export function App(): JSX.Element {
           onProgress: (progress) => {
             const perFrame = 1 / totalFrames;
             const overall = frameIndex * perFrame + progress.progress * perFrame;
-            const easedPreview = applyInterpolationMode(dialogSnapshot.interpolation, frameIndex / Math.max(totalFrames - 1, 1));
             updateProgress(
               overall,
               frameIndex,
               totalFrames,
-              `Rendering frame ${frameIndex + 1}/${totalFrames} (t=${easedPreview.toFixed(3)})`
+              `Rendering frame ${frameIndex + 1}/${totalFrames} (t=${timelineT.toFixed(3)})`
             );
           },
           timeSeconds: 0
@@ -3095,11 +3622,11 @@ export function App(): JSX.Element {
     }
   };
 
-  const onAppendPresetToDefinition = (): void => {
+  const onInsertPresetAtEndOfFragment = (): void => {
     setSettingsCopyActionsOpen(false);
 
     if (parseResult === null) {
-      pushToast("Cannot append preset: compile a system first.", "error");
+      pushToast("Cannot insert preset: compile a fragment first.", "error");
       return;
     }
 
@@ -3119,12 +3646,12 @@ export function App(): JSX.Element {
         ...prev,
         [selectedSystemKey]: nextSource
       }));
-      pushToast(`Preset '${presetName}' appended. Build (F5) to refresh presets.`);
-      console.info(`[app] Appended preset '${presetName}' to '${selectedSystemKey}'.`);
+      pushToast(`Preset '${presetName}' inserted at end of fragment. Build (F5) to refresh presets.`);
+      console.info(`[app] Inserted preset '${presetName}' at end of fragment '${selectedSystemKey}'.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      pushToast(`Append preset failed: ${message}`, "error");
-      console.error(`[app] Failed to append preset for '${selectedSystemKey}': ${message}`);
+      pushToast(`Insert preset failed: ${message}`, "error");
+      console.error(`[app] Failed to insert preset for '${selectedSystemKey}': ${message}`);
     }
   };
 
@@ -3142,6 +3669,7 @@ export function App(): JSX.Element {
         uniformValues,
         camera: cameraState,
         slicePlaneLockFrame,
+        timeline: selectedTimeline === null ? null : cloneTimelineState(selectedTimeline),
         systemDefinition: {
           source: sourceDraft,
           treePath: selectedSystemTreePath,
@@ -3186,11 +3714,11 @@ export function App(): JSX.Element {
           [targetEntryKey]: parsedIncoming
         }));
         setCompileError(null);
-        console.info(`[app] Applied embedded system definition from ${sourceLabel} into '${targetEntryKey}'.`);
+        console.info(`[app] Applied embedded fragment source from ${sourceLabel} into '${targetEntryKey}'.`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         setCompileError(message);
-        throw new Error(`Embedded system definition failed to compile: ${message}`);
+        throw new Error(`Embedded fragment source failed to compile: ${message}`);
       }
     }
 
@@ -3215,6 +3743,15 @@ export function App(): JSX.Element {
           ? null
           : cloneSlicePlaneLockFrame(payload.slicePlaneLockFrame)
     }));
+    setTimelineBySystem((prev) => {
+      const next = { ...prev };
+      if (payload.timeline === undefined || payload.timeline === null) {
+        delete next[targetEntryKey];
+      } else {
+        next[targetEntryKey] = cloneTimelineState(payload.timeline);
+      }
+      return next;
+    });
 
     if (targetParseResult !== null) {
       const nextUniformValues = coerceUniformValues(targetParseResult.uniforms, payload.uniformValues);
@@ -3329,7 +3866,7 @@ export function App(): JSX.Element {
       return;
     }
     if (parseResult === null) {
-      pushToast("Compile a system before exporting Session PNG.", "error");
+      pushToast("Compile a fragment before exporting Session PNG.", "error");
       return;
     }
 
@@ -3341,6 +3878,7 @@ export function App(): JSX.Element {
       uniformValues,
       camera: cameraState,
       slicePlaneLockFrame,
+      timeline: selectedTimeline === null ? null : cloneTimelineState(selectedTimeline),
       systemDefinition: {
         source: sourceDraft,
         treePath: selectedSystemTreePath,
@@ -3584,7 +4122,7 @@ export function App(): JSX.Element {
         }
         occupiedPaths.add(localPath);
         const payload = parseEmbeddedSessionPayloadFromPngBytes(entry.data);
-        const source = requireEmbeddedSystemSource(payload, `ZIP entry '${entry.name}'`);
+        const source = requireEmbeddedFragmentSource(payload, `ZIP entry '${entry.name}'`);
         const pngBlob = uint8ArrayToBlob(entry.data, "image/png");
         const updatedAtMs = entry.modifiedAt?.getTime() ?? Date.now();
         if (!Number.isFinite(updatedAtMs)) {
@@ -3766,7 +4304,7 @@ export function App(): JSX.Element {
         try {
           const source = payload.systemDefinition?.source;
           if (typeof source !== "string" || source.length === 0) {
-            throw new Error("Session is missing embedded system source.");
+            throw new Error("Session is missing embedded fragment source.");
           }
           const parsed = parseFragmentSource({
             source,
@@ -3805,6 +4343,15 @@ export function App(): JSX.Element {
                 ? null
                 : cloneSlicePlaneLockFrame(payload.slicePlaneLockFrame)
           }));
+          setTimelineBySystem((prev) => {
+            const next = { ...prev };
+            if (payload.timeline === undefined || payload.timeline === null) {
+              delete next[entryKey];
+            } else {
+              next[entryKey] = cloneTimelineState(payload.timeline);
+            }
+            return next;
+          });
           setCompileError(null);
           setSelectedSystemKey(entryKey);
           return;
@@ -3820,7 +4367,7 @@ export function App(): JSX.Element {
 
     setSelectedSystemKey(entryKey);
     if (parsedBySystem[entryKey] === undefined) {
-      compileSystem(entryKey);
+      compileFragment(entryKey);
     }
   };
 
@@ -3870,7 +4417,7 @@ export function App(): JSX.Element {
 
   const saveSourceToLocalPath = async (normalizedPath: string): Promise<void> => {
     if (parseResult === null) {
-      throw new Error("Compile the current system before saving a local session snapshot.");
+      throw new Error("Compile the current fragment before saving a local session snapshot.");
     }
 
     const targetEntryKey = makeLocalEntryKey(normalizedPath);
@@ -3882,6 +4429,7 @@ export function App(): JSX.Element {
       uniformValues,
       camera: cameraState,
       slicePlaneLockFrame,
+      timeline: selectedTimeline === null ? null : cloneTimelineState(selectedTimeline),
       systemDefinition: {
         source: sourceDraft,
         treePath: selectedSystemTreePath,
@@ -4054,6 +4602,16 @@ export function App(): JSX.Element {
       ...prev,
       [targetEntryKey]: slicePlaneLockFrame === null ? null : cloneSlicePlaneLockFrame(slicePlaneLockFrame)
     }));
+    setTimelineBySystem((prev) => {
+      const next = { ...prev };
+      const current = prev[selectedSystemKey];
+      if (current === undefined) {
+        delete next[targetEntryKey];
+      } else {
+        next[targetEntryKey] = cloneTimelineState(current);
+      }
+      return next;
+    });
     setSelectedSystemKey(targetEntryKey);
     setBlockingTask({
       title: "Saving Session Snapshot",
@@ -4114,6 +4672,11 @@ export function App(): JSX.Element {
       delete next[entryKey];
       return next;
     });
+    setTimelineBySystem((prev) => {
+      const next = { ...prev };
+      delete next[entryKey];
+      return next;
+    });
 
     if (selectedSystemKey === entryKey) {
       setSelectedSystemKey(getDefaultPresetEntryKey());
@@ -4160,6 +4723,7 @@ export function App(): JSX.Element {
     setCameraBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
     setActivePresetBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
     setSlicePlaneLockFrameBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
+    setTimelineBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
     setActiveUniformGroupBySystem((prev) => renameRecordKey(prev, fromEntryKey, toEntryKey));
     setSelectedSystemKey((prev) => (prev === fromEntryKey ? toEntryKey : prev));
   };
@@ -4287,7 +4851,7 @@ export function App(): JSX.Element {
     setDefinitionActionsOpen(false);
     const result = formatFragmentSource(sourceDraft);
     if (!result.changed) {
-      pushToast("Definition already formatted.");
+      pushToast("Fragment already formatted.");
       return;
     }
 
@@ -4295,7 +4859,7 @@ export function App(): JSX.Element {
       ...prev,
       [selectedSystemKey]: result.text
     }));
-    pushToast("Definition beautified.");
+    pushToast("Fragment beautified.");
   };
 
   const onCancelSaveLocalDialog = (): void => {
@@ -4356,11 +4920,14 @@ export function App(): JSX.Element {
           <div className="definition-actions-group definition-actions-group-main">
             <AppButton
               variant="primary"
-              onClick={() => compileSystem(selectedSystemKey)}
+              onClick={() => compileFragment(selectedSystemKey)}
               disabled={isBlockingTaskActive}
               title="Build (F5)"
             >
-              Build (F5)
+              <span className="button-content">
+                <UiIcon name="play" size={13} />
+                <span>Build (F5)</span>
+              </span>
             </AppButton>
           </div>
           <div className="definition-actions-group definition-actions-group-session">
@@ -4369,35 +4936,21 @@ export function App(): JSX.Element {
               disabled={isBlockingTaskActive}
               title="Save as New Session"
             >
-              Save New
+              <span className="button-content">
+                <UiIcon name="save" size={13} />
+                <span>Save New</span>
+              </span>
             </AppButton>
             <AppButton
               onClick={() => void onUpdateCurrentSession()}
               disabled={!canUpdateCurrentSession || isBlockingTaskActive}
               title={selectedLocalPath === null ? "Update Current Session (disabled on presets)" : "Update Current Session"}
             >
-              Update
+              <span className="button-content">
+                <UiIcon name="refresh" size={13} />
+                <span>Update</span>
+              </span>
             </AppButton>
-            <div className="header-menu-anchor" ref={definitionActionsRef}>
-              <AppButton
-                variant="ghost"
-                className="header-menu-trigger definition-actions-more"
-                aria-label="Definition actions"
-                aria-haspopup="menu"
-                aria-expanded={definitionActionsOpen}
-                onClick={() => setDefinitionActionsOpen((prev) => !prev)}
-                title="More actions"
-              >
-                ⋯
-              </AppButton>
-              {definitionActionsOpen ? (
-                <div className="header-menu-popup" role="menu" aria-label="Definition actions menu">
-                  <button type="button" role="menuitem" onClick={onBeautifySource}>
-                    Beautify Definition
-                  </button>
-                </div>
-              ) : null}
-            </div>
           </div>
         </div>
         <div className="definition-editor-panel">
@@ -4406,7 +4959,7 @@ export function App(): JSX.Element {
             onChange={(next) => {
               setEditorSourceBySystem((prev) => ({ ...prev, [selectedSystemKey]: next }));
             }}
-            onBuild={() => compileSystem(selectedSystemKey)}
+            onBuild={() => compileFragment(selectedSystemKey)}
             jumpRequest={editorJumpRequest}
           />
         </div>
@@ -4414,10 +4967,73 @@ export function App(): JSX.Element {
           <AppButton
             onClick={() => setLegacyImportDialogOpen(true)}
             disabled={isBlockingTaskActive}
-            title="Open legacy Fragmentarium system browser"
+            title="Open legacy Fragmentarium fragment browser"
           >
-            Legacy Fragmentarium import...
+            <span className="button-content">
+              <UiIcon name="import" size={13} />
+              <span>Legacy Fragmentarium import...</span>
+            </span>
           </AppButton>
+          <div className="header-menu-anchor section-actions-menu-anchor" ref={definitionActionsRef}>
+            <AppButton
+              variant="ghost"
+              className="header-menu-trigger definition-actions-more"
+              aria-label="Fragment actions"
+              aria-haspopup="menu"
+              aria-expanded={definitionActionsOpen}
+              onClick={() => setDefinitionActionsOpen((prev) => !prev)}
+              title="More actions"
+            >
+              ⋯
+            </AppButton>
+            {definitionActionsOpen ? (
+              <div className="header-menu-popup is-upward" role="menu" aria-label="Fragment actions menu">
+                <button type="button" role="menuitem" onClick={onBeautifySource}>
+                  Beautify Fragment
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={onInsertPresetAtEndOfFragment}
+                  disabled={parseResult === null}
+                >
+                  Insert Preset at end of Fragment
+                </button>
+                <div className="header-menu-submenu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    aria-expanded={definitionPresetSubmenuOpen}
+                    className="header-submenu-trigger"
+                    onClick={() => setDefinitionPresetSubmenuOpen((prev) => !prev)}
+                    disabled={parseResult === null || parseResult.presets.length === 0}
+                  >
+                    <span>Apply Preset</span>
+                    <span aria-hidden="true">›</span>
+                  </button>
+                  {definitionPresetSubmenuOpen && parseResult !== null && parseResult.presets.length > 0 ? (
+                    <div className="header-menu-popup header-menu-submenu-popup" role="menu" aria-label="Apply preset">
+                      {parseResult.presets.map((preset) => (
+                        <button
+                          key={preset.name}
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            onApplyPreset(preset.name);
+                            setDefinitionPresetSubmenuOpen(false);
+                            setDefinitionActionsOpen(false);
+                          }}
+                        >
+                          {preset.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </section>
     </div>
@@ -4471,223 +5087,323 @@ export function App(): JSX.Element {
 
   const rightPane = (
     <div className="pane-content right-pane">
-      <section className="section-block">
-        <h2>System Preset</h2>
-        {parseResult !== null && parseResult.presets.length > 0 ? (
-          <select
-            value={activePresetBySystem[selectedSystemKey] ?? ""}
-            onChange={(event) => {
-              const presetName = event.target.value;
-              if (presetName.length > 0) {
-                onApplyPreset(presetName);
-              }
-            }}
-          >
-            <option value="" disabled>
-              Select preset
-            </option>
-            {parseResult.presets.map((preset) => (
-              <option key={preset.name} value={preset.name}>
-                {preset.name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <p className="muted">No presets found in this source.</p>
-        )}
-      </section>
-
       <section className="section-block right-pane-tab-shell grow">
         <div className="right-pane-tab-content">
           {activeRightPaneTab === "integrator" ? (
             <>
-              <h2>Integrator</h2>
-              <select
-                value={activeIntegratorId}
-                onChange={(event) => onSwitchIntegrator(event.target.value)}
-              >
-                {INTEGRATORS.map((integrator) => (
-                  <option key={integrator.id} value={integrator.id}>
-                    {integrator.name}
-                  </option>
-                ))}
-              </select>
+              <div className="integrator-mode-tiles" role="tablist" aria-label="Integrator mode">
+                {INTEGRATOR_MODE_TILES.map((tile) => {
+                  const integrator = getIntegratorById(tile.id);
+                  if (integrator === null) {
+                    return null;
+                  }
+                  const isActive = activeIntegratorId === tile.id;
+                  return (
+                    <button
+                      key={tile.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      className={`integrator-mode-tile ${isActive ? "is-active" : ""}`}
+                      onClick={() => onSwitchIntegrator(tile.id)}
+                      title={integrator.name}
+                    >
+                      <span className="integrator-mode-tile-label">{tile.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
               <p className="muted">{activeIntegrator.description}</p>
 
               <div className="integrator-options">
-                {groupedIntegratorOptions.map(({ group, options }) => {
-                  const panelItems = buildIntegratorPanelRenderItems(buildIntegratorOptionRenderItems(options));
-                  return (
-                    <div key={group} className="integrator-option-group">
-                      <h3 className="integrator-option-group-title">{group}</h3>
-                      {panelItems.map((item) => {
-                        if (item.kind === "single") {
-                          const option = item.option;
-                          const value = activeIntegratorOptions[option.key] ?? option.defaultValue;
-                          const step = optionStep(option);
-                          const isToggle = isIntegratorToggleOption(option);
-                          const isDefault = isNumericSliderAtDefault(value, option.defaultValue, step);
-                          if (isToggle) {
-                            return (
-                              <div className="integrator-control-row integrator-control-row-toggle" key={option.key}>
-                                <span className="integrator-control-label">{option.label}</span>
-                                <div className="integrator-control-main integrator-toggle-cell">
-                                  <ToggleSwitch
-                                    className={`integrator-toggle-checkbox ${isDefault ? "slider-default" : "slider-changed"}`}
-                                    checked={value >= 0.5}
-                                    ariaLabel={option.label}
-                                    onChange={(checked) => onIntegratorOptionChange(option.key, checked ? 1 : 0)}
+                {(() => {
+                  const groupNodes = groupedIntegratorOptions
+                    .map(({ group, options }) => {
+                      const panelItems = buildIntegratorPanelRenderItems(buildIntegratorOptionRenderItems(options));
+
+                      return (
+                        <div key={group} className="integrator-option-group">
+                          <h3 className="integrator-option-group-title">{group}</h3>
+                          {panelItems.map((item) => {
+                            if (item.kind === "single") {
+                              const option = item.option;
+                              const value = activeIntegratorOptions[option.key] ?? option.defaultValue;
+                              const step = optionStep(option);
+                              const isToggle = isIntegratorToggleOption(option);
+                              const isDefault = isNumericSliderAtDefault(value, option.defaultValue, step);
+                              if (isToggle) {
+                                return (
+                                  <div className="integrator-control-row integrator-control-row-toggle" key={option.key}>
+                                    <span className="integrator-control-label">
+                                      <HoverHelpLabel helpText={getIntegratorOptionHelpText(option.key)}>
+                                        {option.label}
+                                      </HoverHelpLabel>
+                                    </span>
+                                    <div className="integrator-control-main integrator-toggle-cell">
+                                      <ToggleSwitch
+                                        className={`integrator-toggle-checkbox ${isDefault ? "slider-default" : "slider-changed"}`}
+                                        checked={value >= 0.5}
+                                        ariaLabel={option.label}
+                                        onChange={(checked) => onIntegratorOptionChange(option.key, checked ? 1 : 0)}
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div className="integrator-control-row" key={option.key}>
+                                  <span className="integrator-control-label">
+                                    <HoverHelpLabel helpText={getIntegratorOptionHelpText(option.key)}>
+                                      {option.label}
+                                    </HoverHelpLabel>
+                                  </span>
+                                  <input
+                                    className={`integrator-control-slider ${rangeSliderClassName(value, option.defaultValue, step)}`}
+                                    type="range"
+                                    min={option.min}
+                                    max={option.max}
+                                    step={step}
+                                    value={value}
+                                    onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
+                                  />
+                                  <input
+                                    className="uniform-number integrator-control-value"
+                                    type="number"
+                                    min={option.min}
+                                    max={option.max}
+                                    step={step}
+                                    value={value}
+                                    onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
                                   />
                                 </div>
-                              </div>
-                            );
-                          }
-                          return (
-                            <div className="integrator-control-row" key={option.key}>
-                              <span className="integrator-control-label">{option.label}</span>
-                              <input
-                                className={`integrator-control-slider ${rangeSliderClassName(value, option.defaultValue, step)}`}
-                                type="range"
-                                min={option.min}
-                                max={option.max}
-                                step={step}
-                                value={value}
-                                onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
-                              />
-                              <input
-                                className="uniform-number integrator-control-value"
-                                type="number"
-                                min={option.min}
-                                max={option.max}
-                                step={step}
-                                value={value}
-                                onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
-                              />
-                            </div>
-                          );
-                        }
+                              );
+                            }
 
-                        if (item.kind === "axisTriplet") {
-                          const axisRows = [
-                            { axisLabel: "X", option: item.x },
-                            { axisLabel: "Y", option: item.y },
-                            { axisLabel: "Z", option: item.z }
-                          ];
-                          return (
-                            <div
-                              className="integrator-vector-subgroup"
-                              key={`${item.x.key}:${item.y.key}:${item.z.key}`}
-                            >
-                              <div className="integrator-vector-subgroup-title">{item.label}</div>
-                              {axisRows.map(({ axisLabel, option }) => {
-                                const value = activeIntegratorOptions[option.key] ?? option.defaultValue;
-                                const step = optionStep(option);
-                                return (
-                                  <div
-                                    className="integrator-control-row integrator-control-row-nested integrator-control-row-axis"
-                                    key={option.key}
-                                  >
-                                    <span className="integrator-control-label integrator-control-label-sub">{axisLabel}</span>
+                            if (item.kind === "axisTriplet") {
+                              const axisRows = [
+                                { axisLabel: "X", option: item.x },
+                                { axisLabel: "Y", option: item.y },
+                                { axisLabel: "Z", option: item.z }
+                              ];
+                              return (
+                                <div
+                                  className="integrator-vector-subgroup"
+                                  key={`${item.x.key}:${item.y.key}:${item.z.key}`}
+                                >
+                                  <div className="integrator-vector-subgroup-title">{item.label}</div>
+                                  {axisRows.map(({ axisLabel, option }) => {
+                                    const value = activeIntegratorOptions[option.key] ?? option.defaultValue;
+                                    const step = optionStep(option);
+                                    return (
+                                      <div
+                                        className="integrator-control-row integrator-control-row-nested integrator-control-row-axis"
+                                        key={option.key}
+                                      >
+                                        <span className="integrator-control-label integrator-control-label-sub">
+                                          <HoverHelpLabel helpText={getIntegratorOptionHelpText(option.key)}>
+                                            {axisLabel}
+                                          </HoverHelpLabel>
+                                        </span>
+                                        <input
+                                          className={`integrator-control-slider ${rangeSliderClassName(value, option.defaultValue, step)}`}
+                                          type="range"
+                                          min={option.min}
+                                          max={option.max}
+                                          step={step}
+                                          value={value}
+                                          onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
+                                        />
+                                        <input
+                                          className="uniform-number integrator-control-value"
+                                          type="number"
+                                          min={option.min}
+                                          max={option.max}
+                                          step={step}
+                                          value={value}
+                                          onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
+                                        />
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            }
+
+                            if (item.kind === "directionTriplet") {
+                              const direction = resolveDirectionTripletValues(
+                                activeIntegratorOptions,
+                                item.x,
+                                item.y,
+                                item.z,
+                                item.label
+                              );
+                              const axisRows = [
+                                { axisLabel: "X", option: item.x, index: 0 },
+                                { axisLabel: "Y", option: item.y, index: 1 },
+                                { axisLabel: "Z", option: item.z, index: 2 }
+                              ] as const;
+
+                              const onDirectionAxisChange = (axisIndex: number, rawValue: number): void => {
+                                const next = [direction[0], direction[1], direction[2]];
+                                next[axisIndex] = rawValue;
+                                const bounded = clampDirectionComponents([
+                                  clamp(next[0], item.x.min, item.x.max),
+                                  clamp(next[1], item.y.min, item.y.max),
+                                  clamp(next[2], item.z.min, item.z.max)
+                                ]);
+                                try {
+                                  const normalized = normalizeDirectionArray(
+                                    bounded,
+                                    `${item.label} direction`
+                                  );
+                                  onIntegratorOptionPatch({
+                                    [item.x.key]: normalized[0],
+                                    [item.y.key]: normalized[1],
+                                    [item.z.key]: normalized[2]
+                                  });
+                                } catch (error) {
+                                  console.warn(`[app] Invalid direction for '${item.label}': ${String(error)}`);
+                                }
+                              };
+
+                              return (
+                                <div
+                                  className="integrator-vector-subgroup integrator-direction-control"
+                                  key={`${item.x.key}:${item.y.key}:${item.z.key}`}
+                                >
+                                  <div className="integrator-vector-subgroup-title">
+                                    <HoverHelpLabel helpText={getIntegratorOptionHelpText(item.x.key)}>
+                                      {item.label}
+                                    </HoverHelpLabel>
+                                  </div>
+                                  <div className="integrator-direction-layout">
+                                    <DirectionTrackballControl
+                                      className="integrator-direction-trackball"
+                                      value={direction}
+                                      ariaLabel={`${item.label} direction`}
+                                      onChange={(next) => {
+                                        onIntegratorOptionPatch({
+                                          [item.x.key]: next[0],
+                                          [item.y.key]: next[1],
+                                          [item.z.key]: next[2]
+                                        });
+                                      }}
+                                    />
+                                    <div className="integrator-direction-fields">
+                                      {axisRows.map(({ axisLabel, option, index }) => (
+                                        <div
+                                          className="integrator-control-row integrator-control-row-nested integrator-control-row-axis"
+                                          key={option.key}
+                                        >
+                                          <span className="integrator-control-label integrator-control-label-sub">
+                                            <HoverHelpLabel helpText={getIntegratorOptionHelpText(option.key)}>
+                                              {axisLabel}
+                                            </HoverHelpLabel>
+                                          </span>
+                                          <input
+                                            className="uniform-number integrator-control-value integrator-control-value-direction"
+                                            type="number"
+                                            min={option.min}
+                                            max={option.max}
+                                            step={optionStep(option)}
+                                            value={direction[index]}
+                                            onChange={(event) =>
+                                              onDirectionAxisChange(index, Number(event.target.value))
+                                            }
+                                          />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            const triplet = item;
+                            const colorHex = getColorTripletDisplayColorHex(triplet, activeIntegratorOptions);
+                            const intensity = getColorTripletIntensity(triplet, activeIntegratorOptions);
+                            const defaultIntensity = getColorTripletDefaultIntensity(triplet);
+                            const intensityStep = getColorTripletIntensityStep(triplet);
+                            const showIntensity = supportsHdrColorTripletIntensity(triplet);
+                            const intensityMax = getColorTripletMax(triplet);
+
+                            return (
+                              <div
+                                className="integrator-color-control"
+                                key={`${triplet.r.key}:${triplet.g.key}:${triplet.b.key}`}
+                              >
+                                <div className="integrator-control-row integrator-control-row-color">
+                                  <span className="integrator-control-label">
+                                    <HoverHelpLabel helpText={getIntegratorColorTripletHelpText(triplet.r.key)}>
+                                      {triplet.label}
+                                    </HoverHelpLabel>
+                                  </span>
+                                  <div className="integrator-control-main integrator-color-cell">
+                                    <ColorPickerButton
+                                      className="integrator-color-picker-button"
+                                      ariaLabel={`${triplet.label} color`}
+                                      value={colorHex}
+                                      onChange={(nextHex) => {
+                                        onIntegratorOptionPatch(
+                                          colorTripletPatchFromHex(triplet, activeIntegratorOptions, nextHex)
+                                        );
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                                {showIntensity ? (
+                                  <div className="integrator-control-row integrator-control-row-nested">
+                                    <span className="integrator-control-label integrator-control-label-sub">
+                                      <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("colorIntensity")}>
+                                        Intensity
+                                      </HoverHelpLabel>
+                                    </span>
                                     <input
-                                      className={`integrator-control-slider ${rangeSliderClassName(value, option.defaultValue, step)}`}
+                                      className={`integrator-control-slider ${rangeSliderClassName(intensity, defaultIntensity, intensityStep)}`}
                                       type="range"
-                                      min={option.min}
-                                      max={option.max}
-                                      step={step}
-                                      value={value}
-                                      onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
+                                      min={0}
+                                      max={intensityMax}
+                                      step={intensityStep}
+                                      value={intensity}
+                                      onChange={(event) => {
+                                        onIntegratorOptionPatch(
+                                          colorTripletPatchFromIntensity(
+                                            triplet,
+                                            activeIntegratorOptions,
+                                            Number(event.target.value)
+                                          )
+                                        );
+                                      }}
                                     />
                                     <input
                                       className="uniform-number integrator-control-value"
                                       type="number"
-                                      min={option.min}
-                                      max={option.max}
-                                      step={step}
-                                      value={value}
-                                      onChange={(event) => onIntegratorOptionChange(option.key, Number(event.target.value))}
+                                      min={0}
+                                      max={intensityMax}
+                                      step={intensityStep}
+                                      value={intensity}
+                                      onChange={(event) => {
+                                        onIntegratorOptionPatch(
+                                          colorTripletPatchFromIntensity(
+                                            triplet,
+                                            activeIntegratorOptions,
+                                            Number(event.target.value)
+                                          )
+                                        );
+                                      }}
                                     />
                                   </div>
-                                );
-                              })}
-                            </div>
-                          );
-                        }
-
-                        const triplet = item;
-                        const colorHex = getColorTripletDisplayColorHex(triplet, activeIntegratorOptions);
-                        const intensity = getColorTripletIntensity(triplet, activeIntegratorOptions);
-                        const defaultIntensity = getColorTripletDefaultIntensity(triplet);
-                        const intensityStep = getColorTripletIntensityStep(triplet);
-                        const showIntensity = supportsHdrColorTripletIntensity(triplet);
-                        const intensityMax = getColorTripletMax(triplet);
-
-                        return (
-                          <div
-                            className="integrator-color-control"
-                            key={`${triplet.r.key}:${triplet.g.key}:${triplet.b.key}`}
-                          >
-                            <div className="integrator-control-row integrator-control-row-color">
-                              <span className="integrator-control-label">{triplet.label}</span>
-                              <div className="integrator-control-main integrator-color-cell">
-                                <ColorPickerButton
-                                  className="integrator-color-picker-button"
-                                  ariaLabel={`${triplet.label} color`}
-                                  value={colorHex}
-                                  onChange={(nextHex) => {
-                                    onIntegratorOptionPatch(
-                                      colorTripletPatchFromHex(triplet, activeIntegratorOptions, nextHex)
-                                    );
-                                  }}
-                                />
+                                ) : null}
                               </div>
-                            </div>
-                            {showIntensity ? (
-                              <div className="integrator-control-row integrator-control-row-nested">
-                                <span className="integrator-control-label integrator-control-label-sub">
-                                  Intensity
-                                </span>
-                                <input
-                                  className={`integrator-control-slider ${rangeSliderClassName(intensity, defaultIntensity, intensityStep)}`}
-                                  type="range"
-                                  min={0}
-                                  max={intensityMax}
-                                  step={intensityStep}
-                                  value={intensity}
-                                  onChange={(event) => {
-                                    onIntegratorOptionPatch(
-                                      colorTripletPatchFromIntensity(
-                                        triplet,
-                                        activeIntegratorOptions,
-                                        Number(event.target.value)
-                                      )
-                                    );
-                                  }}
-                                />
-                                <input
-                                  className="uniform-number integrator-control-value"
-                                  type="number"
-                                  min={0}
-                                  max={intensityMax}
-                                  step={intensityStep}
-                                  value={intensity}
-                                  onChange={(event) => {
-                                    onIntegratorOptionPatch(
-                                      colorTripletPatchFromIntensity(
-                                        triplet,
-                                        activeIntegratorOptions,
-                                        Number(event.target.value)
-                                      )
-                                    );
-                                  }}
-                                />
-                              </div>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
+                            );
+                          })}
+                        </div>
+                      );
+                    })
+                    .filter((entry): entry is JSX.Element => entry !== null);
+
+                  return groupNodes;
+                })()}
               </div>
               <div className="tab-reset-row">
                 <AppButton onClick={onResetActiveIntegratorOptions}>
@@ -4702,7 +5418,11 @@ export function App(): JSX.Element {
               <h2>Render</h2>
               <div className="integrator-options">
                 <div className="uniform-row">
-                  <span className="uniform-label">Move Res Scale</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("moveResScale")}>
+                      Move Res Scale
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs">
                     <input
                       className={rangeSliderClassName(
@@ -4734,7 +5454,11 @@ export function App(): JSX.Element {
                 </div>
 
                 <div className="uniform-row">
-                  <span className="uniform-label">Max Subframes</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("maxSubframes")}>
+                      Max Subframes
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs">
                     <input
                       className={rangeSliderClassName(
@@ -4762,7 +5486,11 @@ export function App(): JSX.Element {
                 </div>
 
                 <div className="uniform-row">
-                  <span className="uniform-label">Tile Count</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("tileCount")}>
+                      Tile Count
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs">
                     <input
                       className={rangeSliderClassName(renderSettings.tileCount, DEFAULT_RENDER_SETTINGS.tileCount, 1)}
@@ -4786,7 +5514,11 @@ export function App(): JSX.Element {
                 </div>
 
                 <div className="uniform-row">
-                  <span className="uniform-label">Tiles/Frame</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("tilesPerFrame")}>
+                      Tiles/Frame
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs">
                     <input
                       className={rangeSliderClassName(
@@ -4814,7 +5546,11 @@ export function App(): JSX.Element {
                 </div>
 
                 <div className="uniform-row">
-                  <span className="uniform-label">Aspect Preset</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("aspectPreset")}>
+                      Aspect Preset
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs render-aspect-preset-inputs">
                     <select
                       value={renderAspectRatioLocked ? selectedRenderAspectPresetId : "custom"}
@@ -4827,19 +5563,30 @@ export function App(): JSX.Element {
                         </option>
                       ))}
                     </select>
-                    <div className="uniform-bool render-aspect-lock-toggle">
-                      <span>Lock</span>
-                      <ToggleSwitch
-                        checked={renderAspectRatioLocked}
-                        ariaLabel="Lock render aspect ratio"
-                        onChange={onRenderAspectRatioLockChange}
-                      />
-                    </div>
                   </div>
                 </div>
 
                 <div className="uniform-row">
-                  <span className="uniform-label">Aspect Ratio</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("aspectLock")}>
+                      Aspect Lock
+                    </HoverHelpLabel>
+                  </span>
+                  <div className="uniform-inputs uniform-inputs-checkbox render-aspect-lock-row">
+                    <ToggleSwitch
+                      checked={renderAspectRatioLocked}
+                      ariaLabel="Lock render aspect ratio"
+                      onChange={onRenderAspectRatioLockChange}
+                    />
+                  </div>
+                </div>
+
+                <div className="uniform-row">
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("aspectRatio")}>
+                      Aspect Ratio
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs render-aspect-ratio-inputs">
                     <input
                       className="uniform-number"
@@ -4876,7 +5623,11 @@ export function App(): JSX.Element {
               <h2>Post</h2>
               <div className="integrator-options">
                 <div className="uniform-row">
-                  <span className="uniform-label">Tone Mapping</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("toneMapping")}>
+                      Tone Mapping
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs">
                     <select
                       value={renderSettings.toneMapping}
@@ -4900,7 +5651,11 @@ export function App(): JSX.Element {
                 </div>
 
                 <div className="uniform-row">
-                  <span className="uniform-label">Exposure</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("exposure")}>
+                      Exposure
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs">
                     <input
                       className={rangeSliderClassName(renderSettings.exposure, DEFAULT_RENDER_SETTINGS.exposure, 0.01)}
@@ -4924,7 +5679,11 @@ export function App(): JSX.Element {
                 </div>
 
                 <div className="uniform-row">
-                  <span className="uniform-label">Gamma</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("gamma")}>
+                      Gamma
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs">
                     <input
                       className={rangeSliderClassName(renderSettings.gamma, DEFAULT_RENDER_SETTINGS.gamma, 0.01)}
@@ -4948,7 +5707,11 @@ export function App(): JSX.Element {
                 </div>
 
                 <div className="uniform-row">
-                  <span className="uniform-label">Brightness</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("brightness")}>
+                      Brightness
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs">
                     <input
                       className={rangeSliderClassName(
@@ -4976,7 +5739,11 @@ export function App(): JSX.Element {
                 </div>
 
                 <div className="uniform-row">
-                  <span className="uniform-label">Contrast</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("contrast")}>
+                      Contrast
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs">
                     <input
                       className={rangeSliderClassName(renderSettings.contrast, DEFAULT_RENDER_SETTINGS.contrast, 0.01)}
@@ -5000,7 +5767,11 @@ export function App(): JSX.Element {
                 </div>
 
                 <div className="uniform-row">
-                  <span className="uniform-label">Saturation</span>
+                  <span className="uniform-label">
+                    <HoverHelpLabel helpText={getBuiltinPaneControlHelpText("saturation")}>
+                      Saturation
+                    </HoverHelpLabel>
+                  </span>
                   <div className="uniform-inputs">
                     <input
                       className={rangeSliderClassName(
@@ -5050,7 +5821,7 @@ export function App(): JSX.Element {
                     <p className="muted">No parameters in this group.</p>
                   )
                 ) : (
-                  <p className="muted">Compile a system to expose parameters.</p>
+                  <p className="muted">Compile a fragment to expose parameters.</p>
                 )}
               </div>
               <div className="tab-reset-row">
@@ -5083,7 +5854,10 @@ export function App(): JSX.Element {
               aria-expanded={settingsCopyActionsOpen}
               onClick={() => setSettingsCopyActionsOpen((prev) => !prev)}
             >
-              Session
+              <span className="button-content">
+                <UiIcon name="session" size={13} />
+                <span>Session</span>
+              </span>
             </AppButton>
             {settingsCopyActionsOpen ? (
               <div
@@ -5099,7 +5873,10 @@ export function App(): JSX.Element {
                     void onCopySettingsToClipboard();
                   }}
                 >
-                  Copy Session JSON
+                  <span className="menu-item-content">
+                    <UiIcon name="copy" size={13} />
+                    <span>Copy Session JSON</span>
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -5109,7 +5886,10 @@ export function App(): JSX.Element {
                     void onPasteSettingsFromClipboard();
                   }}
                 >
-                  Paste Session JSON
+                  <span className="menu-item-content">
+                    <UiIcon name="paste" size={13} />
+                    <span>Paste Session JSON</span>
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -5120,18 +5900,16 @@ export function App(): JSX.Element {
                   }}
                   disabled={parseResult === null || sessionPngExportInProgress || isBlockingTaskActive}
                 >
-                  {sessionPngExportInProgress ? "Exporting Session PNG..." : "Download Session PNG"}
+                  <span className="menu-item-content">
+                    <UiIcon name="download" size={13} />
+                    <span>{sessionPngExportInProgress ? "Exporting Session PNG..." : "Download Session PNG"}</span>
+                  </span>
                 </button>
                 <button type="button" role="menuitem" onClick={onResetAllSettings}>
-                  Reset Session Settings
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={onAppendPresetToDefinition}
-                  disabled={parseResult === null}
-                >
-                  Insert Preset into Definition
+                  <span className="menu-item-content">
+                    <UiIcon name="reset" size={13} />
+                    <span>Reset Session Settings</span>
+                  </span>
                 </button>
               </div>
             ) : null}
@@ -5140,6 +5918,41 @@ export function App(): JSX.Element {
       </div>
     </div>
   );
+
+  const timelinePane = timelineEnabled ? (
+    <div className="timeline-shell" style={{ height: `${TIMELINE_PANEL_HEIGHT_PX}px` }}>
+      {selectedTimeline !== null ? (
+        <TimelinePanel
+          keyframes={selectedTimeline.keyframes}
+          activeKeyId={selectedTimeline.activeKeyId}
+          playheadT={selectedTimeline.playheadT}
+          interpolation={selectedTimeline.interpolation}
+          graphLines={timelineGraphLines}
+          isPlaying={timelinePlaying}
+          playbackDurationSeconds={selectedTimeline.playbackDurationSeconds}
+          onPlaybackDurationChange={onTimelinePlaybackDurationChange}
+          onPlay={onTimelinePlay}
+          onPause={onTimelinePause}
+          onPrevKeyframe={() => onTimelineStepKeyframe("prev")}
+          onNextKeyframe={() => onTimelineStepKeyframe("next")}
+          onInterpolationChange={onTimelineInterpolationChange}
+          onScrubPreview={onTimelineScrubPreview}
+          onScrubCommit={onTimelineScrubCommit}
+          onActivateKeyframe={onTimelineActivateKeyframe}
+          onMoveKeyframe={onTimelineMoveKeyframe}
+          onMoveKeyframeEnd={onTimelineMoveKeyframeEnd}
+          onAddLeft={() => onTimelineAddKeyframe("left")}
+          onAddRight={() => onTimelineAddKeyframe("right")}
+          onDeleteActive={onTimelineDeleteActiveKey}
+          onFit={onTimelineFit}
+        />
+      ) : (
+        <section className="timeline-panel section-block">
+          <p className="muted">Initializing timeline…</p>
+        </section>
+      )}
+    </div>
+  ) : null;
 
   return (
     <div
@@ -5160,12 +5973,27 @@ export function App(): JSX.Element {
             onClick={() => setSessionGalleryOpen(true)}
             disabled={isBlockingTaskActive}
           >
-            Session Gallery
+            <span className="button-content">
+              <UiIcon name="gallery" size={13} />
+              <span>Session Gallery</span>
+            </span>
           </AppButton>
         </div>
         <div className="topbar-actions">
+          <div className="topbar-timeline-toggle">
+            <span className="topbar-timeline-toggle-label">Timeline</span>
+            <ToggleSwitch
+              checked={timelineEnabled}
+              disabled={isBlockingTaskActive}
+              ariaLabel="Toggle timeline panel"
+              onChange={onTimelineToggle}
+            />
+          </div>
           <AppButton onClick={() => setHelpDialogOpen(true)} disabled={isBlockingTaskActive}>
-            Help...
+            <span className="button-content">
+              <UiIcon name="help" size={13} />
+              <span>Help...</span>
+            </span>
           </AppButton>
           <AppButton
             variant="primary"
@@ -5173,7 +6001,10 @@ export function App(): JSX.Element {
             onClick={onOpenExportDialog}
             disabled={isBlockingTaskActive}
           >
-            Export Render...
+            <span className="button-content">
+              <UiIcon name="export" size={13} />
+              <span>Export Render...</span>
+            </span>
           </AppButton>
         </div>
       </header>
@@ -5187,16 +6018,19 @@ export function App(): JSX.Element {
         </div>
       ) : null}
 
-      <SplitLayout
-        leftWidth={leftPanePx}
-        rightWidth={rightPanePx}
-        minPaneWidth={MIN_PANE_WIDTH}
-        onLeftWidthChange={setLeftPanePx}
-        onRightWidthChange={setRightPanePx}
-        left={leftPane}
-        center={centerPane}
-        right={rightPane}
-      />
+      <div className="main-with-timeline">
+        <SplitLayout
+          leftWidth={leftPanePx}
+          rightWidth={rightPanePx}
+          minPaneWidth={MIN_PANE_WIDTH}
+          onLeftWidthChange={setLeftPanePx}
+          onRightWidthChange={setRightPanePx}
+          left={leftPane}
+          center={centerPane}
+          right={rightPane}
+        />
+        {timelinePane}
+      </div>
 
       {(compileError !== null || shaderError !== null) && (
         <div className="error-strip">
@@ -5287,7 +6121,7 @@ export function App(): JSX.Element {
       />
       <ExportRenderDialog
         open={exportDialogState !== null}
-        canAnimate={parseResult !== null && parseResult.presets.length > 0}
+        canAnimate={timelineHasAnimation}
         mode={exportDialogState?.mode ?? "still"}
         width={exportDialogState?.width ?? 1920}
         height={exportDialogState?.height ?? 1080}
@@ -5295,11 +6129,6 @@ export function App(): JSX.Element {
         aspectRatio={exportDialogState?.aspectRatio ?? ((exportDialogState?.width ?? 1920) / Math.max(1, exportDialogState?.height ?? 1080))}
         subframes={exportDialogState?.subframes ?? Math.max(1, renderSettings.maxSubframes || 30)}
         frameCount={exportDialogState?.frameCount ?? 100}
-        presetNames={exportPresetNames}
-        startPresetName={exportDialogState?.startPresetName ?? null}
-        endPresetName={exportDialogState?.endPresetName ?? null}
-        interpolation={exportDialogState?.interpolation ?? "linear"}
-        previewFrame={exportDialogState?.previewFrame ?? 0}
         movieSupported={webCodecsMovieAvailable}
         movieUnavailableReason={
           webCodecsMovieAvailable ? null : "WebCodecs VideoEncoder is not available in this browser context."
@@ -5308,7 +6137,6 @@ export function App(): JSX.Element {
         movieFps={exportDialogState?.movieFps ?? 30}
         movieBitrateMbps={exportDialogState?.movieBitrateMbps ?? 12}
         movieKeyframeInterval={exportDialogState?.movieKeyframeInterval ?? 30}
-        changedValues={exportChangedValues}
         statusMessage={exportDialogState?.statusMessage ?? null}
         isExporting={exportProgressState !== null}
         progress={exportProgressState}
@@ -5317,9 +6145,6 @@ export function App(): JSX.Element {
         onStartMovieExport={() => void onStartMovieExportRender()}
         onCancelExport={onCancelExportRender}
         onModeChange={(mode) => {
-          if (mode === "still") {
-            restoreExportPreviewSnapshot();
-          }
           updateExportDialogState({
             mode,
             statusMessage: null
@@ -5340,18 +6165,10 @@ export function App(): JSX.Element {
             return {
               ...prev,
               frameCount: nextFrameCount,
-              previewFrame: Math.min(prev.previewFrame, Math.max(0, nextFrameCount - 1)),
               statusMessage: null
             };
           })
         }
-        onStartPresetChange={(name) =>
-          setExportDialogState((prev) => (prev === null ? prev : { ...prev, startPresetName: name, statusMessage: null }))
-        }
-        onEndPresetChange={(name) =>
-          setExportDialogState((prev) => (prev === null ? prev : { ...prev, endPresetName: name, statusMessage: null }))
-        }
-        onInterpolationChange={(mode) => updateExportDialogState({ interpolation: mode, statusMessage: null })}
         onMovieCodecChange={(codec) => updateExportDialogState({ movieCodec: codec, statusMessage: null })}
         onMovieFpsChange={(value) => updateExportDialogState({ movieFps: Math.max(1, value), statusMessage: null })}
         onMovieBitrateMbpsChange={(value) =>
@@ -5359,18 +6176,6 @@ export function App(): JSX.Element {
         }
         onMovieKeyframeIntervalChange={(value) =>
           updateExportDialogState({ movieKeyframeInterval: Math.max(1, value), statusMessage: null })
-        }
-        onPreviewFrameChange={(value) =>
-          setExportDialogState((prev) => {
-            if (prev === null) {
-              return prev;
-            }
-            return {
-              ...prev,
-              previewFrame: Math.max(0, Math.min(Math.max(0, prev.frameCount - 1), Math.round(value))),
-              statusMessage: null
-            };
-          })
         }
       />
       <SessionGalleryDialog

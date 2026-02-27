@@ -20,7 +20,7 @@ describe("ConfirmDeleteLocalSystemDialog", () => {
       />
     );
 
-    expect(screen.getByText("Delete `mandelbulb/mikaels` from local storage?")).toBeInTheDocument();
+    expect(screen.getByText("Delete session `mandelbulb/mikaels`?")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 

@@ -1,4 +1,5 @@
 import type { ParsedPreset, UniformDefinition, UniformValue } from "./types";
+import { normalizeDirectionArray } from "../../utils/direction";
 
 export function getDefaultUniformValues(definitions: UniformDefinition[]): Record<string, UniformValue> {
   const values: Record<string, UniformValue> = {};
@@ -61,8 +62,13 @@ export function sanitizeUniformValue(
       return Math.round(clampNumber(Number(value), definition.min[0], definition.max[0]));
     case "vec2":
       return sanitizeArray(value, 2, definition.min, definition.max);
-    case "vec3":
-      return sanitizeArray(value, 3, definition.min, definition.max);
+    case "vec3": {
+      const vector = sanitizeArray(value, 3, definition.min, definition.max);
+      if (definition.control === "direction") {
+        return normalizeDirectionArray(vector, `Uniform '${definition.name}' direction`);
+      }
+      return vector;
+    }
     case "vec4":
       return sanitizeArray(value, 4, definition.min, definition.max);
     default:

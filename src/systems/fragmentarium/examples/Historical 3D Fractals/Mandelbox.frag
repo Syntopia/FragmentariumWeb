@@ -25,7 +25,7 @@ vec4 scale = vec4(Scale, Scale, Scale, abs(Scale)) / MinRad2;
 
 // precomputed constants
 
-uniform vec3 RotVector; slider[(0,0,0),(1,1,1),(1,1,1)]
+uniform vec3 RotVector; direction[(1,0,0)]
 
 // Scale parameter. A perfect Menger is 3.0
 uniform float RotAngle; slider[0.00,0,180]

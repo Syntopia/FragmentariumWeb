@@ -12,17 +12,19 @@ uniform float uIntegrator_shadowStrength;
 uniform float uIntegrator_shadowSoftness;
 uniform float uIntegrator_fog;
 uniform float uIntegrator_backgroundStrength;
-uniform float uIntegrator_sunAzimuth;
-uniform float uIntegrator_sunElevation;
+uniform float uIntegrator_sunDirectionX;
+uniform float uIntegrator_sunDirectionY;
+uniform float uIntegrator_sunDirectionZ;
 
 const int MAX_TRACE_STEPS = 1024;
 const int MAX_AO_SAMPLES = 8;
 
 vec3 computeSunDirection() {
-  float az = radians(uIntegrator_sunAzimuth);
-  float el = radians(uIntegrator_sunElevation);
-  float cosEl = cos(el);
-  return normalize(vec3(sin(az) * cosEl, sin(el), cos(az) * cosEl));
+  return normalize(vec3(
+    uIntegrator_sunDirectionX,
+    uIntegrator_sunDirectionY,
+    uIntegrator_sunDirectionZ
+  ));
 }
 
 float baseEpsilon() {
@@ -185,8 +187,9 @@ const deFastOptionTemplate: IntegratorOptionDefinition[] = [
   { key: "shadowSoftness", label: "Shadow Softness", min: 1, max: 100, defaultValue: 12, step: 0.1 },
   { key: "fog", label: "Fog", min: 0, max: 2, defaultValue: 0.2, step: 0.01 },
   { key: "backgroundStrength", label: "Background", min: 0, max: 1, defaultValue: 0.2, step: 0.01 },
-  { key: "sunAzimuth", label: "Sun Azimuth", min: 0, max: 360, defaultValue: 20, step: 0.1 },
-  { key: "sunElevation", label: "Sun Elevation", min: -10, max: 90, defaultValue: 45, step: 0.1 },
+  { key: "sunDirectionX", label: "Sun Direction X", min: -1, max: 1, defaultValue: 0.2418, step: 0.01, control: "direction" },
+  { key: "sunDirectionY", label: "Sun Direction Y", min: -1, max: 1, defaultValue: 0.7071, step: 0.01, control: "direction" },
+  { key: "sunDirectionZ", label: "Sun Direction Z", min: -1, max: 1, defaultValue: 0.6645, step: 0.01, control: "direction" },
   { key: "aperture", label: "Aperture", min: 0, max: 0.2, defaultValue: 0, step: 0.0001 },
   { key: "focalDistance", label: "Focal Dist", min: 0.05, max: 4000, defaultValue: 6, step: 0.01 },
   { key: "aaJitter", label: "AA Jitter", min: 0, max: 2, defaultValue: 1, step: 0.01 },
@@ -215,8 +218,9 @@ uniform float uIntegrator_shadowStrength;
 uniform float uIntegrator_shadowSoftness;
 uniform float uIntegrator_fog;
 uniform float uIntegrator_backgroundStrength;
-uniform float uIntegrator_sunAzimuth;
-uniform float uIntegrator_sunElevation;
+uniform float uIntegrator_sunDirectionX;
+uniform float uIntegrator_sunDirectionY;
+uniform float uIntegrator_sunDirectionZ;
 
 uniform float uIntegrator_diffuseColorR;
 uniform float uIntegrator_diffuseColorG;
@@ -242,10 +246,11 @@ const int MAX_AO_SAMPLES = 8;
 const float PI_SURFACE = 3.141592653589793;
 
 vec3 computeSunDirection() {
-  float az = radians(uIntegrator_sunAzimuth);
-  float el = radians(uIntegrator_sunElevation);
-  float cosEl = cos(el);
-  return normalize(vec3(sin(az) * cosEl, sin(el), cos(az) * cosEl));
+  return normalize(vec3(
+    uIntegrator_sunDirectionX,
+    uIntegrator_sunDirectionY,
+    uIntegrator_sunDirectionZ
+  ));
 }
 
 float baseEpsilon() {
@@ -546,8 +551,9 @@ const deQualityOptionTemplate: IntegratorOptionDefinition[] = [
   { key: "shadowSoftness", label: "Shadow Softness", min: 1, max: 100, defaultValue: 12, step: 0.1 },
   { key: "fog", label: "Fog", min: 0, max: 2, defaultValue: 0.2, step: 0.01 },
   { key: "backgroundStrength", label: "Background", min: 0, max: 1, defaultValue: 0.2, step: 0.01 },
-  { key: "sunAzimuth", label: "Sun Azimuth", min: 0, max: 360, defaultValue: 20, step: 0.1 },
-  { key: "sunElevation", label: "Sun Elevation", min: -10, max: 90, defaultValue: 45, step: 0.1 },
+  { key: "sunDirectionX", label: "Sun Direction X", min: -1, max: 1, defaultValue: 0.2418, step: 0.01, control: "direction" },
+  { key: "sunDirectionY", label: "Sun Direction Y", min: -1, max: 1, defaultValue: 0.7071, step: 0.01, control: "direction" },
+  { key: "sunDirectionZ", label: "Sun Direction Z", min: -1, max: 1, defaultValue: 0.6645, step: 0.01, control: "direction" },
   { key: "diffuseColorR", label: "Diffuse R", min: 0, max: 1, defaultValue: 0.9, step: 0.01 },
   { key: "diffuseColorG", label: "Diffuse G", min: 0, max: 1, defaultValue: 0.82, step: 0.01 },
   { key: "diffuseColorB", label: "Diffuse B", min: 0, max: 1, defaultValue: 0.72, step: 0.01 },
@@ -611,12 +617,15 @@ uniform float uIntegrator_areaLightColorG;
 uniform float uIntegrator_areaLightColorB;
 uniform int uIntegrator_maxDistance;
 uniform float uIntegrator_sampleClamp;
-uniform float uIntegrator_sunAzimuth;
-uniform float uIntegrator_sunElevation;
+uniform float uIntegrator_sunDirectionX;
+uniform float uIntegrator_sunDirectionY;
+uniform float uIntegrator_sunDirectionZ;
 uniform int uIntegrator_iblEnabled;
 uniform float uIntegrator_iblStrength;
 uniform float uIntegrator_iblExposure;
-uniform float uIntegrator_iblRotationDeg;
+uniform float uIntegrator_iblZenithX;
+uniform float uIntegrator_iblZenithY;
+uniform float uIntegrator_iblZenithZ;
 uniform float uIntegrator_iblHorizonGlow;
 uniform float uIntegrator_iblHotspotStrength;
 uniform float uIntegrator_iblHotspotSizeDeg;
@@ -636,17 +645,11 @@ const float PI = 3.141592653589793;
 const float INV_PI = 0.3183098861837907;
 
 vec3 computeSunDirection() {
-  float az = radians(uIntegrator_sunAzimuth);
-  float el = radians(uIntegrator_sunElevation);
-  float cosEl = cos(el);
-  return normalize(vec3(sin(az) * cosEl, sin(el), cos(az) * cosEl));
-}
-
-vec3 rotateYDegrees(vec3 v, float deg) {
-  float a = radians(deg);
-  float c = cos(a);
-  float s = sin(a);
-  return vec3(c * v.x + s * v.z, v.y, -s * v.x + c * v.z);
+  return normalize(vec3(
+    uIntegrator_sunDirectionX,
+    uIntegrator_sunDirectionY,
+    uIntegrator_sunDirectionZ
+  ));
 }
 
 float minDistPTPhys() {
@@ -934,6 +937,14 @@ vec3 sunDirectionPT() {
   return computeSunDirection();
 }
 
+vec3 iblZenithDirectionPT() {
+  return normalize(vec3(
+    uIntegrator_iblZenithX,
+    uIntegrator_iblZenithY,
+    uIntegrator_iblZenithZ
+  ));
+}
+
 float sunCosThetaMaxPT() {
   float diameterRad = radians(clamp(uIntegrator_sunAngularDiameterDeg, 0.05, 5.0));
   float halfAngle = 0.5 * diameterRad;
@@ -950,9 +961,10 @@ vec3 iblRadiancePT(vec3 rd) {
     return vec3(0.0);
   }
 
-  vec3 d = normalize(rotateYDegrees(rd, uIntegrator_iblRotationDeg));
-  float skyT = clamp(d.y * 0.5 + 0.5, 0.0, 1.0);
-  float groundT = clamp((-d.y) * 0.5 + 0.5, 0.0, 1.0);
+  vec3 d = normalize(rd);
+  float zenithDot = dot(d, iblZenithDirectionPT());
+  float skyT = clamp(zenithDot * 0.5 + 0.5, 0.0, 1.0);
+  float groundT = clamp((-zenithDot) * 0.5 + 0.5, 0.0, 1.0);
 
   vec3 top = clamp(vec3(uIntegrator_iblTopColorR, uIntegrator_iblTopColorG, uIntegrator_iblTopColorB), vec3(0.0), vec3(8.0));
   vec3 horizon = clamp(
@@ -968,9 +980,9 @@ vec3 iblRadiancePT(vec3 rd) {
 
   vec3 skyBand = mix(horizon, top, smoothstep(0.0, 1.0, skyT * skyT));
   vec3 groundBand = mix(horizon, ground, smoothstep(0.0, 1.0, groundT * groundT));
-  vec3 env = d.y >= 0.0 ? skyBand : groundBand;
+  vec3 env = zenithDot >= 0.0 ? skyBand : groundBand;
 
-  float horizonGlow = exp(-abs(d.y) * 24.0) * max(uIntegrator_iblHorizonGlow, 0.0);
+  float horizonGlow = exp(-abs(zenithDot) * 24.0) * max(uIntegrator_iblHorizonGlow, 0.0);
   env += horizon * horizonGlow;
 
   float hotspotCos = cos(0.5 * radians(clamp(uIntegrator_iblHotspotSizeDeg, 0.1, 180.0)));
@@ -1341,8 +1353,26 @@ function integratorSharedSemanticForKey(key: string): string | null {
   if (key.startsWith("orbitTrap")) {
     return `orbit.${key}`;
   }
-  if (key === "sunAzimuth" || key === "sunElevation" || key === "sunStrength") {
-    return `light.${key}`;
+  if (key === "sunDirectionX") {
+    return "light.sunDirection.x";
+  }
+  if (key === "sunDirectionY") {
+    return "light.sunDirection.y";
+  }
+  if (key === "sunDirectionZ") {
+    return "light.sunDirection.z";
+  }
+  if (key === "sunStrength") {
+    return "light.sunStrength";
+  }
+  if (key === "iblZenithX") {
+    return "light.iblZenith.x";
+  }
+  if (key === "iblZenithY") {
+    return "light.iblZenith.y";
+  }
+  if (key === "iblZenithZ") {
+    return "light.iblZenith.z";
   }
   if (key === "slicePlaneEnabled") {
     return "camera.slicePlaneEnabled";
@@ -1468,14 +1498,17 @@ export const INTEGRATORS: IntegratorDefinition[] = [
       { key: "orbitTrapValue", label: "Trap Value", min: 0, max: 2, defaultValue: 0, step: 0.01 },
       { key: "orbitTrapMix", label: "Trap Mix", min: 0, max: 1, defaultValue: 1, step: 0.01 },
       { key: "directLight", label: "Direct Light", min: 0, max: 1, defaultValue: 1, step: 1 },
-      { key: "sunAzimuth", label: "Sun Azimuth", min: 0, max: 360, defaultValue: 20, step: 0.1 },
-      { key: "sunElevation", label: "Sun Elevation", min: -10, max: 90, defaultValue: 45, step: 0.1 },
+      { key: "sunDirectionX", label: "Sun Direction X", min: -1, max: 1, defaultValue: 0.2418, step: 0.01, control: "direction" },
+      { key: "sunDirectionY", label: "Sun Direction Y", min: -1, max: 1, defaultValue: 0.7071, step: 0.01, control: "direction" },
+      { key: "sunDirectionZ", label: "Sun Direction Z", min: -1, max: 1, defaultValue: 0.6645, step: 0.01, control: "direction" },
       { key: "sunStrength", label: "Sun Strength", min: 0, max: 20, defaultValue: 6, step: 0.01 },
       { key: "skyStrength", label: "Sky Strength", min: 0, max: 5, defaultValue: 1, step: 0.01 },
       { key: "iblEnabled", label: "IBL Enabled", min: 0, max: 1, defaultValue: 1, step: 1 },
       { key: "iblStrength", label: "IBL Strength", min: 0, max: 20, defaultValue: 1, step: 0.01 },
       { key: "iblExposure", label: "IBL Exposure", min: -8, max: 8, defaultValue: 0, step: 0.01 },
-      { key: "iblRotationDeg", label: "IBL Rotate", min: 0, max: 360, defaultValue: 0, step: 0.1 },
+      { key: "iblZenithX", label: "IBL Zenith X", min: -1, max: 1, defaultValue: 0, step: 0.01, control: "direction" },
+      { key: "iblZenithY", label: "IBL Zenith Y", min: -1, max: 1, defaultValue: 1, step: 0.01, control: "direction" },
+      { key: "iblZenithZ", label: "IBL Zenith Z", min: -1, max: 1, defaultValue: 0, step: 0.01, control: "direction" },
       { key: "iblHorizonGlow", label: "IBL Horizon Glow", min: 0, max: 4, defaultValue: 0.4, step: 0.01 },
       { key: "iblHotspotStrength", label: "IBL Hotspot", min: 0, max: 20, defaultValue: 0.8, step: 0.01 },
       { key: "iblHotspotSizeDeg", label: "IBL Hotspot Size", min: 0.1, max: 90, defaultValue: 12, step: 0.1 },

@@ -50,7 +50,7 @@ export function LegacyFragmentariumImportDialog(
           <h3 id="legacy-fragmentarium-import-dialog-title">Legacy Fragmentarium Import</h3>
           <AppButton onClick={props.onClose}>Close</AppButton>
         </div>
-        <p className="muted">Select a built-in Fragmentarium system to load into the editor.</p>
+        <p className="muted">Select a built-in Fragmentarium fragment to load into the editor.</p>
         <div className="legacy-import-tree-shell">
           <SystemsTreeView
             nodes={props.nodes}

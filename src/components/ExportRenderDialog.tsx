@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import type { ExportInterpolationMode, ChangedValueSummary } from "../app/exportInterpolation";
 import type { WebCodecsMovieCodec } from "../utils/webcodecsWebmEncoder";
 import { AppButton } from "./AppButton";
 import { ToggleSwitch } from "./ToggleSwitch";
@@ -22,18 +21,12 @@ export interface ExportRenderDialogProps {
   aspectRatio: number;
   subframes: number;
   frameCount: number;
-  presetNames: string[];
-  startPresetName: string | null;
-  endPresetName: string | null;
-  interpolation: ExportInterpolationMode;
-  previewFrame: number;
   movieSupported: boolean;
   movieUnavailableReason: string | null;
   movieCodec: WebCodecsMovieCodec;
   movieFps: number;
   movieBitrateMbps: number;
   movieKeyframeInterval: number;
-  changedValues: ChangedValueSummary[];
   statusMessage: string | null;
   isExporting: boolean;
   progress: ExportRenderDialogProgress | null;
@@ -47,10 +40,6 @@ export interface ExportRenderDialogProps {
   onAspectRatioLockChange: (locked: boolean) => void;
   onSubframesChange: (value: number) => void;
   onFrameCountChange: (value: number) => void;
-  onStartPresetChange: (name: string) => void;
-  onEndPresetChange: (name: string) => void;
-  onInterpolationChange: (mode: ExportInterpolationMode) => void;
-  onPreviewFrameChange: (value: number) => void;
   onMovieCodecChange: (codec: WebCodecsMovieCodec) => void;
   onMovieFpsChange: (value: number) => void;
   onMovieBitrateMbpsChange: (value: number) => void;
@@ -133,13 +122,12 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
   }
 
   const animationEnabled = props.mode === "animation" && props.canAnimate;
-  const previewFrameMax = Math.max(0, props.frameCount - 1);
   const exportDisabled =
     props.isExporting ||
     props.width <= 0 ||
     props.height <= 0 ||
     props.subframes <= 0 ||
-    (animationEnabled && (props.startPresetName === null || props.endPresetName === null));
+    (animationEnabled && props.frameCount <= 0);
   const movieExportDisabled = exportDisabled || !animationEnabled;
   const movieConfigInvalid =
     props.movieFps <= 0 || props.movieBitrateMbps <= 0 || props.movieKeyframeInterval <= 0;
@@ -295,74 +283,9 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
 
         {animationEnabled ? (
           <>
-            <div className="export-grid">
-              <label className="modal-field">
-                <span className="uniform-label">Start Preset</span>
-                <select
-                  className="modal-input"
-                  value={props.startPresetName ?? ""}
-                  disabled={props.isExporting}
-                  onChange={(event) => props.onStartPresetChange(event.target.value)}
-                >
-                  {props.presetNames.map((name) => (
-                    <option key={`export-start-${name}`} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="modal-field">
-                <span className="uniform-label">End Preset</span>
-                <select
-                  className="modal-input"
-                  value={props.endPresetName ?? ""}
-                  disabled={props.isExporting}
-                  onChange={(event) => props.onEndPresetChange(event.target.value)}
-                >
-                  {props.presetNames.map((name) => (
-                    <option key={`export-end-${name}`} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="modal-field">
-                <span className="uniform-label">Interpolation</span>
-                <select
-                  className="modal-input"
-                  value={props.interpolation}
-                  disabled={props.isExporting}
-                  onChange={(event) => props.onInterpolationChange(event.target.value as ExportInterpolationMode)}
-                >
-                  <option value="linear">Linear</option>
-                  <option value="ease-in-out">Ease In/Out</option>
-                </select>
-              </label>
-            </div>
-
-            <label className="modal-field">
-              <span className="uniform-label">Preview Frame ({props.previewFrame + 1}/{Math.max(1, props.frameCount)})</span>
-              <div className="uniform-inputs">
-                <input
-                  type="range"
-                  min={0}
-                  max={previewFrameMax}
-                  step={1}
-                  value={Math.min(previewFrameMax, props.previewFrame)}
-                  disabled={props.isExporting || previewFrameMax <= 0}
-                  onChange={(event) => props.onPreviewFrameChange(clampInt(event.target.valueAsNumber, 0))}
-                />
-                <input
-                  type="number"
-                  min={0}
-                  max={previewFrameMax}
-                  className="uniform-number"
-                  value={Math.min(previewFrameMax, props.previewFrame)}
-                  disabled={props.isExporting}
-                  onChange={(event) => props.onPreviewFrameChange(clampInt(event.target.valueAsNumber, 0))}
-                />
-              </div>
-            </label>
+            <p className="muted">
+              Animation export uses the Timeline keyframes from the main UI.
+            </p>
 
             <div className="export-changes-panel">
               <div className="section-header-row">
@@ -425,26 +348,6 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
                       onChange={(event) => props.onMovieKeyframeIntervalChange(clampInt(event.target.valueAsNumber, 1))}
                     />
                   </label>
-                </div>
-              )}
-            </div>
-
-            <div className="export-changes-panel">
-              <div className="section-header-row">
-                <h3>Changing Values ({props.changedValues.length})</h3>
-              </div>
-              {props.changedValues.length === 0 ? (
-                <p className="muted">Selected presets produce no changes.</p>
-              ) : (
-                <div className="export-changes-list">
-                  {props.changedValues.map((entry) => (
-                    <div key={`${entry.category}:${entry.name}`} className="export-change-row">
-                      <span className="export-change-name">{entry.name}</span>
-                      <span className="export-change-values">
-                        {entry.from} → {entry.to}
-                      </span>
-                    </div>
-                  ))}
                 </div>
               )}
             </div>

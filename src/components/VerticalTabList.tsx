@@ -1,6 +1,7 @@
 export interface VerticalTabItem {
   id: string;
   label: string;
+  shortLabel?: string;
 }
 
 interface VerticalTabListProps {
@@ -20,8 +21,9 @@ export function VerticalTabList(props: VerticalTabListProps): JSX.Element {
           aria-selected={props.activeTabId === tab.id}
           className={`vertical-tab ${props.activeTabId === tab.id ? "is-active" : ""}`}
           onClick={() => props.onChange(tab.id)}
+          title={tab.label}
         >
-          {tab.label}
+          <span className="vertical-tab-label">{tab.label}</span>
         </button>
       ))}
     </div>

@@ -1,0 +1,5 @@
+4583:                                    <span className="integrator-control-label">{option.label}</span>
+4597:                                  <span className="integrator-control-label">{option.label}</span>
+4640:                                        <span className="integrator-control-label integrator-control-label-sub">{axisLabel}</span>
+4680:                                  <span className="integrator-control-label">{triplet.label}</span>
+4696:                                    <span className="integrator-control-label integrator-control-label-sub">

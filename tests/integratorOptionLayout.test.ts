@@ -41,4 +41,22 @@ describe("integratorOptionLayout", () => {
     const panelItems = buildIntegratorPanelRenderItems(buildIntegratorOptionRenderItems(broken));
     expect(panelItems.every((entry) => entry.kind === "single")).toBe(true);
   });
+
+  test("groups direction controls into a dedicated direction triplet section", () => {
+    const directionOptions: IntegratorOptionDefinition[] = [
+      { key: "sunDirectionX", label: "Sun Direction X", min: -1, max: 1, defaultValue: 0.2, control: "direction" },
+      { key: "sunDirectionY", label: "Sun Direction Y", min: -1, max: 1, defaultValue: 0.7, control: "direction" },
+      { key: "sunDirectionZ", label: "Sun Direction Z", min: -1, max: 1, defaultValue: 0.6, control: "direction" }
+    ];
+    const panelItems = buildIntegratorPanelRenderItems(buildIntegratorOptionRenderItems(directionOptions));
+
+    expect(panelItems).toHaveLength(1);
+    expect(panelItems[0].kind).toBe("directionTriplet");
+    if (panelItems[0].kind === "directionTriplet") {
+      expect(panelItems[0].label).toBe("Sun Direction");
+      expect(panelItems[0].x.key).toBe("sunDirectionX");
+      expect(panelItems[0].y.key).toBe("sunDirectionY");
+      expect(panelItems[0].z.key).toBe("sunDirectionZ");
+    }
+  });
 });

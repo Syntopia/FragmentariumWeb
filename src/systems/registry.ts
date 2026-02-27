@@ -99,7 +99,7 @@ const BUILTIN_INCLUDE_MAP: Record<string, string> = {
 uniform float FOV; slider[0.1,0.45,1.5]
 uniform vec3 Eye; slider[(-20,-20,-20),(0.0,0.0,-6.0),(20,20,20)]
 uniform vec3 Target; slider[(-20,-20,-20),(0.0,0.0,0.0),(20,20,20)]
-uniform vec3 Up; slider[(-1,-1,-1),(0.0,1.0,0.0),(1,1,1)]
+uniform vec3 Up; direction[(0.0,1.0,0.0)]
 `,
   "common-primitives.frag": `
 float sdSphere(vec3 p, float r) {
@@ -277,7 +277,7 @@ uniform float Power; slider[2.0,8.0,16.0]
 uniform float Bailout; slider[2.0,6.5,32.0]
 uniform bool Julia; checkbox[false]
 uniform vec3 JuliaC; slider[(-2,-2,-2),(0,0,0),(2,2,2)]
-uniform vec3 RotVector; slider[(0,0,0),(1,1,1),(1,1,1)]
+uniform vec3 RotVector; direction[(1,0,0)]
 uniform float RotAngle; slider[-180.0,0.0,180.0]
 
 #group Coloring

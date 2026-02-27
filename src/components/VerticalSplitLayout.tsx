@@ -51,7 +51,7 @@ export function VerticalSplitLayout(props: VerticalSplitLayoutProps): JSX.Elemen
       <div
         className="vertical-splitter"
         role="separator"
-        aria-label="Resize systems and definition sections"
+        aria-label="Resize session list and fragment sections"
         onPointerDown={startDrag}
       />
       <div className="vertical-split-bottom">{props.bottom}</div>

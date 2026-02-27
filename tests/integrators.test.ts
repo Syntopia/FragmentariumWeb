@@ -75,7 +75,9 @@ describe("integrators", () => {
     expect(integrator.options.some((option) => option.key === "sunAngularDiameterDeg")).toBe(true);
     expect(integrator.options.some((option) => option.key === "iblEnabled")).toBe(true);
     expect(integrator.options.some((option) => option.key === "iblStrength")).toBe(true);
-    expect(integrator.options.some((option) => option.key === "iblRotationDeg")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "iblZenithX")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "iblZenithY")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "iblZenithZ")).toBe(true);
     expect(integrator.options.some((option) => option.key === "areaLightEnabled")).toBe(true);
     expect(integrator.options.some((option) => option.key === "areaLightIntensity")).toBe(true);
     expect(integrator.options.some((option) => option.key === "areaLightSize")).toBe(true);
@@ -109,10 +111,15 @@ describe("integrators", () => {
     expect(defaults.diffuseColorG).toBe(0.82);
     expect(defaults.diffuseColorB).toBe(0.72);
     expect(defaults.directLight).toBe(1);
+    expect(defaults.sunDirectionX).toBe(0.2418);
+    expect(defaults.sunDirectionY).toBe(0.7071);
+    expect(defaults.sunDirectionZ).toBe(0.6645);
     expect(defaults.iblEnabled).toBe(1);
     expect(defaults.iblStrength).toBe(1);
     expect(defaults.iblExposure).toBe(0);
-    expect(defaults.iblRotationDeg).toBe(0);
+    expect(defaults.iblZenithX).toBe(0);
+    expect(defaults.iblZenithY).toBe(1);
+    expect(defaults.iblZenithZ).toBe(0);
     expect(defaults.detailExp).toBe(-2.7);
     expect(defaults.maxRaySteps).toBe(200);
     expect(defaults.areaLightEnabled).toBe(1);

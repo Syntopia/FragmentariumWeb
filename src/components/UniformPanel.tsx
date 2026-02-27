@@ -1,6 +1,8 @@
 import type { UniformDefinition, UniformValue } from "../core/parser/types";
+import { clampDirectionComponents, normalizeDirectionArray } from "../utils/direction";
 import { clamp, computeRgbIntensity, normalizeRgbByIntensity, parseHexColorToRgb, rgbToHexColor, scaleRgb, type Rgb } from "../utils/colorUi";
 import { ColorPickerButton } from "./ColorPickerButton";
+import { DirectionTrackballControl } from "./DirectionTrackballControl";
 import { ToggleSwitch } from "./ToggleSwitch";
 
 interface UniformPanelProps {
@@ -113,6 +115,19 @@ function UniformControl(props: UniformControlProps): JSX.Element {
     );
   }
 
+  if (definition.control === "direction") {
+    if (vector.length !== 3) {
+      throw new Error(`Direction uniform '${definition.name}' must be vec3.`);
+    }
+    return (
+      <DirectionUniformControl
+        definition={definition}
+        vector={vector}
+        onChange={(next) => props.onChange(next)}
+      />
+    );
+  }
+
   const axisLabels = vectorLabels;
 
   return (
@@ -172,6 +187,63 @@ interface ColorUniformControlProps {
   vector: number[];
   baselineVector: number[];
   onChange: (value: number[]) => void;
+}
+
+interface DirectionUniformControlProps {
+  definition: UniformDefinition;
+  vector: number[];
+  onChange: (value: [number, number, number]) => void;
+}
+
+function DirectionUniformControl(props: DirectionUniformControlProps): JSX.Element {
+  const { definition } = props;
+  const direction = normalizeDirectionArray(props.vector, `Uniform '${definition.name}' direction`);
+  const axisLabels = ["x", "y", "z"] as const;
+
+  const updateDirection = (axisIndex: number, rawValue: number): void => {
+    const next = [...direction];
+    next[axisIndex] = rawValue;
+    const clamped = clampDirectionComponents(next);
+    try {
+      const normalized = normalizeDirectionArray(clamped, `Uniform '${definition.name}' direction`);
+      props.onChange(normalized);
+    } catch (error) {
+      console.warn(`[uniform] Invalid direction for '${definition.name}': ${String(error)}`);
+    }
+  };
+
+  return (
+    <div className="uniform-vector uniform-direction-control">
+      <div className="uniform-vector-header uniform-vector-header-centered">
+        <span className="uniform-label">{definition.name}</span>
+      </div>
+      <div className="uniform-direction-layout">
+        <DirectionTrackballControl
+          value={direction}
+          ariaLabel={`${definition.name} direction`}
+          onChange={(next) => props.onChange(next)}
+        />
+        <div className="uniform-direction-fields">
+          {axisLabels.map((label, index) => (
+            <div className="uniform-row compact uniform-row-direction-axis" key={`${definition.name}-${label}`}>
+              <span className="uniform-axis">{label}</span>
+              <div className="uniform-inputs uniform-inputs-direction">
+                <input
+                  className="uniform-number"
+                  type="number"
+                  min={definition.min[index]}
+                  max={definition.max[index]}
+                  step={inferStep(definition.min[index], definition.max[index])}
+                  value={direction[index]}
+                  onChange={(event) => updateDirection(index, Number(event.target.value))}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ColorUniformControl(props: ColorUniformControlProps): JSX.Element {

@@ -34,7 +34,7 @@ uniform bool useUniformRadius; checkbox[false]
 //If you want to dive inside the hyperbolic space. You will need to set the position of the camera at 0,0,0
 uniform bool useCameraAsRotVector; checkbox[false]
 
-uniform vec3 RotVector; slider[(0,0,0),(1,1,1),(1,1,1)]
+uniform vec3 RotVector; direction[(1,0,0)]
 
 uniform float RotAngle; slider[-1,0,1]
 

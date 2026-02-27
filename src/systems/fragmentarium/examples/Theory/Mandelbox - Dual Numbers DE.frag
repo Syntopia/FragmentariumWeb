@@ -28,7 +28,7 @@ void sphereFold(inout vec3 z, inout mat3 dz) {
 }
 
 mat3 rot;
-uniform vec3 RotVector; slider[(0,0,0),(1,1,1),(1,1,1)]
+uniform vec3 RotVector; direction[(1,0,0)]
 
 uniform float RotAngle; slider[0.00,0,180]
 

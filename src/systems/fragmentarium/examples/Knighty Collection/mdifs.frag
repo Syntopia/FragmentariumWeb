@@ -27,7 +27,7 @@ uniform int auxIter; slider[0,5,20]
 uniform float zOffset; slider[-1,0,1]
 
 #ifdef DO_ROTATIONS
-uniform vec3 RotVector; slider[(0,0,0),(1,1,1),(1,1,1)]
+uniform vec3 RotVector; direction[(1,0,0)]
 
 uniform float RotAngle; slider[-180,0,180]
 

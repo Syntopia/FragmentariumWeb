@@ -150,8 +150,8 @@ void main() {
 }
 `;
 
-function hasBaseColorFunction(source: string): boolean {
-  return /\bvec3\s+baseColor\s*\(/.test(source);
+function hasBaseColorDefinition(source: string): boolean {
+  return /\bvec3\s+baseColor\s*\([^)]*\)\s*\{/.test(source);
 }
 
 function hasDistanceEstimator(source: string): boolean {
@@ -295,14 +295,14 @@ export function buildSceneShaderSources(options: SceneShaderBuildOptions): Scene
     throw new Error("Geometry source must define a DE(vec3) function.");
   }
 
-  const hasBaseColor = hasBaseColorFunction(options.geometrySource);
+  const hasBaseColor = hasBaseColorDefinition(options.geometrySource);
   const hasOrbitTrap = hasOrbitTrapDeclaration(options.geometrySource);
   const hasApertureUniform = hasUniformDeclaration(options.geometrySource, "Aperture");
   const hasFocalPlaneUniform = hasUniformDeclaration(options.geometrySource, "FocalPlane");
 
   const fallbackBaseColor = hasBaseColor
     ? ""
-    : `\nvec3 baseColor(vec3 p, vec3 n) {\n  return vec3(0.85, 0.9, 1.0);\n}\n`;
+    : `\nvec3 baseColor(vec3 p, vec3 n) {\n  return vec3(1.0, 1.0, 1.0);\n}\n`;
   const hasInit = hasInitFunctionDefinition(options.geometrySource);
   const initInvocation = hasInit
     ? "  // Legacy Fragmentarium systems often require init() to update globals from uniforms.\n  init();\n"
@@ -449,11 +449,11 @@ export function buildFocusProbeShaderSources(options: FocusProbeShaderBuildOptio
     throw new Error("Geometry source must define a DE(vec3) function.");
   }
 
-  const hasBaseColor = hasBaseColorFunction(options.geometrySource);
+  const hasBaseColor = hasBaseColorDefinition(options.geometrySource);
   const hasOrbitTrap = hasOrbitTrapDeclaration(options.geometrySource);
   const fallbackBaseColor = hasBaseColor
     ? ""
-    : `\nvec3 baseColor(vec3 p, vec3 n) {\n  return vec3(0.85, 0.9, 1.0);\n}\n`;
+    : `\nvec3 baseColor(vec3 p, vec3 n) {\n  return vec3(1.0, 1.0, 1.0);\n}\n`;
   const hasInit = hasInitFunctionDefinition(options.geometrySource);
   const initInvocation = hasInit
     ? "  // Legacy Fragmentarium systems often require init() to update globals from uniforms.\n  init();\n"

@@ -13,10 +13,19 @@ export interface IntegratorAxisTripletRenderItem {
   z: IntegratorOptionDefinition;
 }
 
+export interface IntegratorDirectionTripletRenderItem {
+  kind: "directionTriplet";
+  label: string;
+  x: IntegratorOptionDefinition;
+  y: IntegratorOptionDefinition;
+  z: IntegratorOptionDefinition;
+}
+
 export type IntegratorPanelRenderItem =
   | IntegratorSingleOptionRenderItem
   | IntegratorColorTripletRenderItem
-  | IntegratorAxisTripletRenderItem;
+  | IntegratorAxisTripletRenderItem
+  | IntegratorDirectionTripletRenderItem;
 
 interface AxisSuffixParts {
   base: string;
@@ -57,6 +66,10 @@ function isSingleItem(item: IntegratorOptionRenderItem | undefined): item is Int
   return item !== undefined && item.kind === "single";
 }
 
+function isDirectionOption(option: IntegratorOptionDefinition): boolean {
+  return option.control === "direction";
+}
+
 function canFormAxisTriplet(
   xItem: IntegratorOptionRenderItem | undefined,
   yItem: IntegratorOptionRenderItem | undefined,
@@ -65,6 +78,52 @@ function canFormAxisTriplet(
   if (!isSingleItem(xItem) || !isSingleItem(yItem) || !isSingleItem(zItem)) {
     return false;
   }
+  if (isDirectionOption(xItem.option) || isDirectionOption(yItem.option) || isDirectionOption(zItem.option)) {
+    return false;
+  }
+  const xKey = parseAxisSuffixFromKey(xItem.option.key);
+  const yKey = parseAxisSuffixFromKey(yItem.option.key);
+  const zKey = parseAxisSuffixFromKey(zItem.option.key);
+  const xLabel = parseAxisSuffixFromLabel(xItem.option.label);
+  const yLabel = parseAxisSuffixFromLabel(yItem.option.label);
+  const zLabel = parseAxisSuffixFromLabel(zItem.option.label);
+  if (xKey === null || yKey === null || zKey === null || xLabel === null || yLabel === null || zLabel === null) {
+    return false;
+  }
+  if (xKey.axis !== "X" || yKey.axis !== "Y" || zKey.axis !== "Z") {
+    return false;
+  }
+  if (xLabel.axis !== "X" || yLabel.axis !== "Y" || zLabel.axis !== "Z") {
+    return false;
+  }
+  if (xKey.base !== yKey.base || xKey.base !== zKey.base) {
+    return false;
+  }
+  if (xLabel.base !== yLabel.base || xLabel.base !== zLabel.base) {
+    return false;
+  }
+  return true;
+}
+
+function canFormDirectionTriplet(
+  xItem: IntegratorOptionRenderItem | undefined,
+  yItem: IntegratorOptionRenderItem | undefined,
+  zItem: IntegratorOptionRenderItem | undefined
+): xItem is IntegratorSingleOptionRenderItem {
+  if (!isSingleItem(xItem) || !isSingleItem(yItem) || !isSingleItem(zItem)) {
+    return false;
+  }
+  if (!isDirectionOption(xItem.option) || !isDirectionOption(yItem.option) || !isDirectionOption(zItem.option)) {
+    return false;
+  }
+  return canFormAxisTripletLike(xItem, yItem, zItem);
+}
+
+function canFormAxisTripletLike(
+  xItem: IntegratorSingleOptionRenderItem,
+  yItem: IntegratorSingleOptionRenderItem,
+  zItem: IntegratorSingleOptionRenderItem
+): boolean {
   const xKey = parseAxisSuffixFromKey(xItem.option.key);
   const yKey = parseAxisSuffixFromKey(yItem.option.key);
   const zKey = parseAxisSuffixFromKey(zItem.option.key);
@@ -104,6 +163,18 @@ export function buildIntegratorPanelRenderItems(
     const first = items[index];
     const second = items[index + 1];
     const third = items[index + 2];
+    if (canFormDirectionTriplet(first, second, third) && isSingleItem(second) && isSingleItem(third)) {
+      const baseLabel = parseAxisSuffixFromLabel(first.option.label)?.base ?? first.option.label;
+      panelItems.push({
+        kind: "directionTriplet",
+        label: normalizeAxisTripletLabel(baseLabel),
+        x: first.option,
+        y: second.option,
+        z: third.option
+      });
+      index += 2;
+      continue;
+    }
     if (canFormAxisTriplet(first, second, third) && isSingleItem(second) && isSingleItem(third)) {
       const baseLabel = parseAxisSuffixFromLabel(first.option.label)?.base ?? first.option.label;
       panelItems.push({

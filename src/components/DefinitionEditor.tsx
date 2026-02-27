@@ -13,9 +13,17 @@ interface DefinitionEditorProps {
   jumpRequest?: DefinitionEditorJumpRequest | null;
 }
 
+const INDENT_TOKEN = "  ";
+
+interface SelectionRange {
+  start: number;
+  end: number;
+}
+
 export function DefinitionEditor(props: DefinitionEditorProps): JSX.Element {
   const highlightRef = useRef<HTMLPreElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const pendingSelectionRef = useRef<SelectionRange | null>(null);
   const highlighted = useMemo(() => highlightDefinitionSource(props.value), [props.value]);
 
   const syncScroll = (target: HTMLTextAreaElement): void => {
@@ -36,7 +44,92 @@ export function DefinitionEditor(props: DefinitionEditorProps): JSX.Element {
 
   useLayoutEffect(() => {
     syncFromInputRef();
+    const textarea = inputRef.current;
+    const pendingSelection = pendingSelectionRef.current;
+    if (textarea !== null && pendingSelection !== null) {
+      const max = textarea.value.length;
+      const start = Math.max(0, Math.min(max, pendingSelection.start));
+      const end = Math.max(0, Math.min(max, pendingSelection.end));
+      textarea.setSelectionRange(start, end);
+      pendingSelectionRef.current = null;
+    }
   }, [highlighted]);
+
+  const applyEditorMutation = (
+    textarea: HTMLTextAreaElement,
+    nextValue: string,
+    nextSelection: SelectionRange
+  ): void => {
+    pendingSelectionRef.current = nextSelection;
+    props.onChange(nextValue);
+    syncScroll(textarea);
+  };
+
+  const onIndentSelection = (textarea: HTMLTextAreaElement): void => {
+    const source = props.value;
+    const selectionStart = textarea.selectionStart;
+    const selectionEnd = textarea.selectionEnd;
+
+    if (selectionStart === selectionEnd) {
+      const next = `${source.slice(0, selectionStart)}${INDENT_TOKEN}${source.slice(selectionEnd)}`;
+      applyEditorMutation(textarea, next, {
+        start: selectionStart + INDENT_TOKEN.length,
+        end: selectionStart + INDENT_TOKEN.length
+      });
+      return;
+    }
+
+    const firstLineStart = source.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+    const before = source.slice(0, firstLineStart);
+    const selected = source.slice(firstLineStart, selectionEnd);
+    const after = source.slice(selectionEnd);
+    const lines = selected.split("\n");
+    const indentedLines = lines.map((line) => `${INDENT_TOKEN}${line}`);
+    const nextSelected = indentedLines.join("\n");
+    const next = `${before}${nextSelected}${after}`;
+
+    applyEditorMutation(textarea, next, {
+      start: selectionStart + INDENT_TOKEN.length,
+      end: selectionEnd + INDENT_TOKEN.length * lines.length
+    });
+  };
+
+  const onOutdentSelection = (textarea: HTMLTextAreaElement): void => {
+    const source = props.value;
+    const selectionStart = textarea.selectionStart;
+    const selectionEnd = textarea.selectionEnd;
+    const firstLineStart = source.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+    const before = source.slice(0, firstLineStart);
+    const selected = source.slice(firstLineStart, selectionEnd);
+    const after = source.slice(selectionEnd);
+    const lines = selected.split("\n");
+
+    const removedCounts: number[] = [];
+    const outdentedLines = lines.map((line) => {
+      if (line.startsWith(INDENT_TOKEN)) {
+        removedCounts.push(INDENT_TOKEN.length);
+        return line.slice(INDENT_TOKEN.length);
+      }
+      if (line.startsWith("\t")) {
+        removedCounts.push(1);
+        return line.slice(1);
+      }
+      removedCounts.push(0);
+      return line;
+    });
+
+    const removedTotal = removedCounts.reduce((acc, value) => acc + value, 0);
+    const removedFirst = removedCounts[0] ?? 0;
+    const nextSelected = outdentedLines.join("\n");
+    const next = `${before}${nextSelected}${after}`;
+    const nextStart = Math.max(firstLineStart, selectionStart - removedFirst);
+    const nextEnd = Math.max(nextStart, selectionEnd - removedTotal);
+
+    applyEditorMutation(textarea, next, {
+      start: nextStart,
+      end: nextEnd
+    });
+  };
 
   useEffect(() => {
     const request = props.jumpRequest;
@@ -89,10 +182,21 @@ export function DefinitionEditor(props: DefinitionEditorProps): JSX.Element {
           if (event.key === "F5") {
             event.preventDefault();
             props.onBuild();
+            return;
           }
           if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
             event.preventDefault();
             props.onBuild();
+            return;
+          }
+          if (event.key === "Tab") {
+            event.preventDefault();
+            const textarea = event.currentTarget;
+            if (event.shiftKey) {
+              onOutdentSelection(textarea);
+              return;
+            }
+            onIndentSelection(textarea);
           }
         }}
       />

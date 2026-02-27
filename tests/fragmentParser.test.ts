@@ -54,6 +54,36 @@ Toggle = false
     ).toThrow(/Include not found/);
   });
 
+  test("parses direction[] controls as normalized vec3 directions", () => {
+    const source = `
+uniform vec3 Up; direction[(0,3,0)]
+`;
+
+    const result = parseFragmentSource({
+      source,
+      sourceName: "direction.frag",
+      includeMap: {}
+    });
+
+    expect(result.uniforms).toHaveLength(1);
+    const up = result.uniforms[0];
+    expect(up.name).toBe("Up");
+    expect(up.control).toBe("direction");
+    expect(up.min).toEqual([-1, -1, -1]);
+    expect(up.max).toEqual([1, 1, 1]);
+    expect(up.defaultValue).toEqual([0, 1, 0]);
+  });
+
+  test("rejects direction[] on non-vec3 uniforms", () => {
+    expect(() =>
+      parseFragmentSource({
+        source: "uniform float Wrong; direction[(1,0,0)]",
+        sourceName: "invalid-direction.frag",
+        includeMap: {}
+      })
+    ).toThrow(/direction\[\] only supports vec3/);
+  });
+
   test("supports legacy lock-token suffixes and skips non-numeric preset values", () => {
     const source = `
 #group Camera

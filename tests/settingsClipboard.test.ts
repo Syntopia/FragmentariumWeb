@@ -161,4 +161,84 @@ describe("settingsClipboard", () => {
       serializeSettingsClipboardPayloadForSessionComparison(base)
     );
   });
+
+  test("round-trips timeline state and includes it in session comparison", () => {
+    const base = buildSettingsClipboardPayload({
+      selectedPresetName: null,
+      integratorId: "de-pathtracer-physical",
+      integratorOptions: {},
+      renderSettings: DEFAULT_RENDER_SETTINGS,
+      uniformValues: {},
+      camera: { eye: [0, 0, -6], target: [0, 0, 0], up: [0, 1, 0], fov: 0.4 },
+      timeline: {
+        version: 1,
+        baseline: {
+          integratorId: "de-pathtracer-physical",
+          integratorOptions: { detail: -2.5 },
+          renderSettings: { ...DEFAULT_RENDER_SETTINGS },
+          uniformValues: { Detail: -2.5 },
+          camera: { eye: [0, 0, -6], target: [0, 0, 0], up: [0, 1, 0], fov: 0.4 },
+          slicePlaneLockFrame: null
+        },
+        keyframes: [
+          { id: "a", t: 0, patch: {} },
+          { id: "b", t: 1, patch: { uniformValues: { Detail: -1.0 } } }
+        ],
+        activeKeyId: "a",
+        playheadT: 0,
+        interpolation: "monotone-cubic",
+        playbackDurationSeconds: 1.5
+      }
+    });
+    const changed = buildSettingsClipboardPayload({
+      ...base,
+      timeline: base.timeline === null || base.timeline === undefined
+        ? base.timeline
+        : {
+            ...base.timeline,
+            keyframes: [
+              { id: "a", t: 0, patch: {} },
+              { id: "b", t: 1, patch: { uniformValues: { Detail: -0.8 } } }
+            ]
+          }
+    });
+
+    const parsed = parseSettingsClipboardPayload(serializeSettingsClipboardPayload(base));
+    expect(parsed.timeline?.keyframes).toHaveLength(2);
+    expect(parsed.timeline?.interpolation).toBe("monotone-cubic");
+    expect(parsed.timeline?.keyframes[1].patch.uniformValues?.Detail).toBeCloseTo(-1.0);
+    expect(serializeSettingsClipboardPayloadForSessionComparison(base)).not.toBe(
+      serializeSettingsClipboardPayloadForSessionComparison(changed)
+    );
+  });
+
+  test("defaults legacy timeline playback duration when missing", () => {
+    const payload = JSON.stringify({
+      format: SETTINGS_CLIPBOARD_FORMAT,
+      selectedPresetName: null,
+      integratorId: "de-pathtracer-physical",
+      integratorOptions: {},
+      renderSettings: DEFAULT_RENDER_SETTINGS,
+      uniformValues: {},
+      camera: { eye: [0, 0, -6], target: [0, 0, 0], up: [0, 1, 0], fov: 0.4 },
+      timeline: {
+        version: 1,
+        baseline: {
+          integratorId: "de-pathtracer-physical",
+          integratorOptions: {},
+          renderSettings: DEFAULT_RENDER_SETTINGS,
+          uniformValues: {},
+          camera: { eye: [0, 0, -6], target: [0, 0, 0], up: [0, 1, 0], fov: 0.4 },
+          slicePlaneLockFrame: null
+        },
+        keyframes: [{ id: "k0", t: 0.5, patch: {} }],
+        activeKeyId: "k0",
+        playheadT: 0.5,
+        interpolation: "linear"
+      }
+    });
+
+    const parsed = parseSettingsClipboardPayload(payload);
+    expect(parsed.timeline?.playbackDurationSeconds).toBeCloseTo(3);
+  });
 });
