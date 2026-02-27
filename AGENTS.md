@@ -6,6 +6,8 @@ This repository is a WebGL2/React application for browsing and rendering Fragmen
 
 The app parses Fragmentarium `.frag` files, builds a composed scene shader (geometry + integrator GLSL + bridge code), and renders progressively in a WebGL2 canvas.
 
+Terminology: refer to shader source code assets as "fragments" (not "definitions" or "systems").
+
 ## Setup
 
 ## Prerequisites
@@ -131,9 +133,9 @@ Current built-in integrator IDs include:
 - `src/core/geometry/vector.ts`: vector math helpers
 - `src/core/geometry/quaternion.ts`: quaternion helpers
 
-## Built-in systems/content
+## Built-in fragments/content
 
-- `src/systems/registry.ts`: system registry
+- `src/systems/registry.ts`: fragment registry
 - `src/systems/fragmentarium/manifest.json`: source manifest
 - `src/systems/fragmentarium/examples/`: bundled Fragmentarium examples
 - `src/systems/fragmentarium/include/`: legacy Fragmentarium include files (reference/source material)
