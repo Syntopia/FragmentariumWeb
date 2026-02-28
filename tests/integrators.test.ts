@@ -78,6 +78,7 @@ describe("integrators", () => {
     expect(integrator.options.some((option) => option.key === "iblZenithX")).toBe(true);
     expect(integrator.options.some((option) => option.key === "iblZenithY")).toBe(true);
     expect(integrator.options.some((option) => option.key === "iblZenithZ")).toBe(true);
+    expect(integrator.options.some((option) => option.key === "fog")).toBe(true);
     expect(integrator.options.some((option) => option.key === "areaLightEnabled")).toBe(true);
     expect(integrator.options.some((option) => option.key === "areaLightIntensity")).toBe(true);
     expect(integrator.options.some((option) => option.key === "areaLightSize")).toBe(true);
@@ -120,6 +121,7 @@ describe("integrators", () => {
     expect(defaults.iblZenithX).toBe(0);
     expect(defaults.iblZenithY).toBe(1);
     expect(defaults.iblZenithZ).toBe(0);
+    expect(defaults.fog).toBe(0);
     expect(defaults.detailExp).toBe(-2.7);
     expect(defaults.maxRaySteps).toBe(200);
     expect(defaults.areaLightEnabled).toBe(1);
@@ -161,6 +163,7 @@ describe("integrators", () => {
         orbitTrapPaletteIndex: 6,
         orbitTrapHueScale: 2.75,
         useOrbitTrap: 0,
+        fog: 0.75,
         focalDistance: 12,
         slicePlaneEnabled: 1,
         slicePlaneDistance: 4.25,
@@ -180,6 +183,7 @@ describe("integrators", () => {
     expect(transferred.orbitTrapPaletteIndex).toBe(6);
     expect(transferred.orbitTrapHueScale).toBe(2.75);
     expect(transferred.useOrbitTrap).toBe(0);
+    expect(transferred.fog).toBe(0.75);
     expect(transferred.focalDistance).toBe(12);
     expect(transferred.slicePlaneEnabled).toBe(1);
     expect(transferred.slicePlaneDistance).toBe(4.25);

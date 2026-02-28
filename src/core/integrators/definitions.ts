@@ -605,6 +605,7 @@ uniform float uIntegrator_orbitTrapMix;
 uniform int uIntegrator_directLight;
 uniform float uIntegrator_sunStrength;
 uniform float uIntegrator_skyStrength;
+uniform float uIntegrator_fog;
 uniform float uIntegrator_sunAngularDiameterDeg;
 uniform int uIntegrator_areaLightEnabled;
 uniform float uIntegrator_areaLightIntensity;
@@ -1115,6 +1116,7 @@ vec3 renderColor(vec3 ro, vec3 rd) {
   vec3 origin = ro;
   vec3 direction = normalize(rd);
   float lastPdf = 0.0;
+  float primaryHitDistance = -1.0;
 
   for (int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
     if (bounce >= uIntegrator_bounceCount) {
@@ -1125,6 +1127,9 @@ vec3 renderColor(vec3 ro, vec3 rd) {
     vec3 hitNormal;
     float hitT;
     bool hit = traceDE(origin, direction, hitPos, hitNormal, hitT);
+    if (bounce == 0 && hit) {
+      primaryHitDistance = hitT;
+    }
     if (!hit) {
       vec3 env = environmentRadiancePT(direction);
 
@@ -1270,6 +1275,14 @@ vec3 renderColor(vec3 ro, vec3 rd) {
     }
   }
 
+  if (primaryHitDistance > 0.0 && uIntegrator_fog > 0.0) {
+    float fogDensity = pow(max(uIntegrator_fog, 0.0), 4.0);
+    float fogFactor = 1.0 - exp(-fogDensity * primaryHitDistance * primaryHitDistance);
+    vec3 viewDir = normalize(rd);
+    vec3 background = environmentRadiancePT(viewDir) + sunRadiance(viewDir);
+    radiance = mix(radiance, background, clamp(fogFactor, 0.0, 1.0));
+  }
+
   if (uIntegrator_sampleClamp > 0.0) {
     return min(radiance, vec3(uIntegrator_sampleClamp));
   }
@@ -1385,6 +1398,9 @@ function integratorSharedSemanticForKey(key: string): string | null {
   }
   if (key === "slicePlaneKeepFarSide") {
     return "camera.slicePlaneKeepFarSide";
+  }
+  if (key === "fog") {
+    return "environment.fog";
   }
   if (key === "aperture" || key === "focalDistance" || key === "aaJitter") {
     return `camera.${key}`;
@@ -1503,6 +1519,7 @@ export const INTEGRATORS: IntegratorDefinition[] = [
       { key: "sunDirectionZ", label: "Sun Direction Z", min: -1, max: 1, defaultValue: 0.6645, step: 0.01, control: "direction" },
       { key: "sunStrength", label: "Sun Strength", min: 0, max: 20, defaultValue: 6, step: 0.01 },
       { key: "skyStrength", label: "Sky Strength", min: 0, max: 5, defaultValue: 1, step: 0.01 },
+      { key: "fog", label: "Fog", min: 0, max: 2, defaultValue: 0, step: 0.01 },
       { key: "iblEnabled", label: "IBL Enabled", min: 0, max: 1, defaultValue: 1, step: 1 },
       { key: "iblStrength", label: "IBL Strength", min: 0, max: 20, defaultValue: 1, step: 0.01 },
       { key: "iblExposure", label: "IBL Exposure", min: -8, max: 8, defaultValue: 0, step: 0.01 },

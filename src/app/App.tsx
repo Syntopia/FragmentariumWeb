@@ -7,7 +7,13 @@ import { ConfirmDiscardChangesDialog } from "../components/ConfirmDiscardChanges
 import { ConfirmDeleteLocalSystemDialog } from "../components/ConfirmDeleteLocalSystemDialog";
 import { DirectionTrackballControl } from "../components/DirectionTrackballControl";
 import { SaveLocalSystemDialog } from "../components/SaveLocalSystemDialog";
-import { ExportRenderDialog, type ExportRenderDialogProgress } from "../components/ExportRenderDialog";
+import {
+  ExportRenderDialog,
+  type ExportAnimationFormat,
+  type ExportQualityPresetId,
+  type ExportRenderDialogProgress,
+  type ExportSizePresetId
+} from "../components/ExportRenderDialog";
 import { HelpDialog } from "../components/HelpDialog";
 import { HoverHelpLabel } from "../components/HoverHelpLabel";
 import { LegacyFragmentariumImportDialog } from "../components/LegacyFragmentariumImportDialog";
@@ -134,7 +140,6 @@ import buildVersion from "../../build-version.json";
 
 const MIN_PANE_WIDTH = 240;
 const TIMELINE_PANEL_HEIGHT_PX = 176;
-const TIMELINE_RAIL_HEIGHT_PX = 36;
 const EXPORT_STILL_TILE_THRESHOLD_PIXELS = 2048 * 2048;
 const EXPORT_STILL_TILE_SIZE = 1024;
 const DEFAULT_STARTUP_INTEGRATOR_ID = "de-pathtracer-physical";
@@ -280,7 +285,8 @@ interface ExportDialogState {
   aspectRatioLocked: boolean;
   aspectRatio: number;
   subframes: number;
-  frameCount: number;
+  animationDurationSeconds: number;
+  animationFormat: ExportAnimationFormat;
   movieCodec: WebCodecsMovieCodec;
   movieFps: number;
   movieBitrateMbps: number;
@@ -888,6 +894,12 @@ function computeAspectRatioValue(x: number, y: number): number | null {
     return null;
   }
   return x / y;
+}
+
+function computeAnimationFrameCount(durationSeconds: number, fps: number): number {
+  const duration = Number.isFinite(durationSeconds) ? Math.max(0.1, durationSeconds) : 0.1;
+  const framesPerSecond = Number.isFinite(fps) ? Math.max(1, Math.round(fps)) : 1;
+  return Math.max(1, Math.round(duration * framesPerSecond));
 }
 
 function estimateViewportPixelsFromStatus(status: RendererStatus): { width: number; height: number } | null {
@@ -2880,25 +2892,36 @@ export function App(): JSX.Element {
 
   const onTimelineActivateKeyframe = (keyId: string): void => {
     setTimelinePlaying(false);
-    let snapshotToApply: ReturnType<typeof buildTimelineSnapshot> | null = null;
+    const timeline = timelineBySystem[selectedSystemKey];
+    if (timeline === undefined) {
+      return;
+    }
+    const keyframe = timeline.keyframes.find((entry) => entry.id === keyId);
+    if (keyframe === undefined) {
+      return;
+    }
+    const nextTimeline: SessionTimelineState = {
+      ...timeline,
+      activeKeyId: keyId,
+      playheadT: keyframe.t
+    };
+    const snapshotToApply = resolveTimelineKeyframeSnapshot(nextTimeline, keyId);
+
     setTimelineBySystem((prev) => {
-      const timeline = prev[selectedSystemKey];
-      if (timeline === undefined) {
+      const current = prev[selectedSystemKey];
+      if (current === undefined) {
         return prev;
       }
-      const keyframe = timeline.keyframes.find((entry) => entry.id === keyId);
-      if (keyframe === undefined) {
+      if (current.activeKeyId === keyId && Math.abs(current.playheadT - keyframe.t) <= 1e-6) {
         return prev;
       }
-      const nextTimeline: SessionTimelineState = {
-        ...timeline,
-        activeKeyId: keyId,
-        playheadT: keyframe.t
-      };
-      snapshotToApply = resolveTimelineKeyframeSnapshot(nextTimeline, keyId);
       return {
         ...prev,
-        [selectedSystemKey]: nextTimeline
+        [selectedSystemKey]: {
+          ...current,
+          activeKeyId: keyId,
+          playheadT: keyframe.t
+        }
       };
     });
     if (snapshotToApply !== null) {
@@ -3049,7 +3072,7 @@ export function App(): JSX.Element {
     };
   }, [applyTimelineSnapshotToSelectedSystem, commitTimelinePreviewToNearestKey, selectedSystemKey, timelinePlaying]);
 
-  const onOpenExportDialog = (): void => {
+  const onOpenExportDialog = (mode: "still" | "animation"): void => {
     if (parseResult === null) {
       pushToast("Compile a fragment before exporting.", "error");
       return;
@@ -3067,13 +3090,14 @@ export function App(): JSX.Element {
     const exportHeight = Math.max(1, estimatedHeight);
 
     setExportDialogState({
-      mode: "still",
+      mode,
       width: exportWidth,
       height: exportHeight,
       aspectRatioLocked: true,
       aspectRatio: exportAspectRatio,
-      subframes: renderSettings.maxSubframes > 0 ? renderSettings.maxSubframes : 30,
-      frameCount: 100,
+      subframes: Math.max(1, Math.min(8, renderSettings.maxSubframes > 0 ? renderSettings.maxSubframes : 3)),
+      animationDurationSeconds: selectedTimeline?.playbackDurationSeconds ?? 3,
+      animationFormat: "movie",
       movieCodec: "vp9",
       movieFps: 30,
       movieBitrateMbps: 12,
@@ -3132,7 +3156,7 @@ export function App(): JSX.Element {
 
     const abortController = new AbortController();
     exportAbortControllerRef.current = abortController;
-    const totalFrames = Math.max(1, dialogSnapshot.frameCount);
+    const totalFrames = computeAnimationFrameCount(dialogSnapshot.animationDurationSeconds, dialogSnapshot.movieFps);
     setExportProgressState({
       overallProgress: 0,
       currentFrameIndex: 0,
@@ -3353,6 +3377,60 @@ export function App(): JSX.Element {
     });
   };
 
+  const onApplyExportSizePreset = (preset: ExportSizePresetId): void => {
+    setExportDialogState((prev) => {
+      if (prev === null) {
+        return prev;
+      }
+      const viewport = estimateViewportPixelsFromStatus(status);
+      let width = prev.width;
+      let height = prev.height;
+      if (preset === "viewport") {
+        width = viewport?.width ?? width;
+        height = viewport?.height ?? height;
+      } else if (preset === "hd") {
+        width = 1920;
+        height = 1080;
+      } else if (preset === "4k") {
+        width = 3840;
+        height = 2160;
+      } else if (preset === "square") {
+        width = 1080;
+        height = 1080;
+      }
+      const aspectRatio = Math.max(1, width) / Math.max(1, height);
+      return {
+        ...prev,
+        width: Math.max(1, Math.round(width)),
+        height: Math.max(1, Math.round(height)),
+        aspectRatio,
+        statusMessage: null
+      };
+    });
+  };
+
+  const onApplyExportQualityPreset = (preset: ExportQualityPresetId): void => {
+    setExportDialogState((prev) => {
+      if (prev === null) {
+        return prev;
+      }
+      const targetFrames = preset === "draft" ? 5 : preset === "balanced" ? 25 : 50;
+      const fps = Math.max(1, prev.movieFps);
+      const next =
+        preset === "draft"
+          ? { subframes: 1, movieBitrateMbps: 8, movieKeyframeInterval: 30 }
+          : preset === "balanced"
+            ? { subframes: 3, movieBitrateMbps: 12, movieKeyframeInterval: 30 }
+            : { subframes: 8, movieBitrateMbps: 24, movieKeyframeInterval: 60 };
+      return {
+        ...prev,
+        ...next,
+        animationDurationSeconds: Math.max(0.1, targetFrames / fps),
+        statusMessage: null
+      };
+    });
+  };
+
   const onStartExportRender = async (): Promise<void> => {
     if (exportDialogState === null) {
       return;
@@ -3373,10 +3451,11 @@ export function App(): JSX.Element {
 
     const abortController = new AbortController();
     exportAbortControllerRef.current = abortController;
+    const animationFrameCount = computeAnimationFrameCount(dialogSnapshot.animationDurationSeconds, dialogSnapshot.movieFps);
     setExportProgressState({
       overallProgress: 0,
       currentFrameIndex: 0,
-      totalFrames: exportMode === "animation" ? Math.max(1, dialogSnapshot.frameCount) : 1,
+      totalFrames: exportMode === "animation" ? animationFrameCount : 1,
       etaLabel: "Estimating…",
       stageLabel: "Preparing renderer..."
     });
@@ -3589,7 +3668,7 @@ export function App(): JSX.Element {
       if (animationTimeline === null) {
         throw new Error("Animation timeline is unavailable.");
       }
-      const totalFrames = Math.max(1, dialogSnapshot.frameCount);
+      const totalFrames = animationFrameCount;
       const entries: Array<{ name: string; data: Uint8Array }> = [];
       let currentIntegratorId = normalizeIntegratorId(activeIntegratorId);
       let currentIntegrator = getIntegratorById(currentIntegratorId);
@@ -4969,7 +5048,7 @@ export function App(): JSX.Element {
 
   const leftPane = (
     <div className="pane-content left-pane left-pane-content">
-      <section className="section-block grow">
+      <section className="section-block grow definition-shell">
         <div className="section-header-row definition-actions-toolbar">
           <div className="definition-actions-group definition-actions-group-main">
             <AppButton
@@ -4980,31 +5059,117 @@ export function App(): JSX.Element {
             >
               <span className="button-content">
                 <UiIcon name="play" size={13} />
-                <span>Build (F5)</span>
+                <span>Build</span>
               </span>
             </AppButton>
           </div>
           <div className="definition-actions-group definition-actions-group-session">
-            <AppButton
-              onClick={onSaveAsNewSession}
-              disabled={isBlockingTaskActive}
-              title="Save as New Session"
-            >
-              <span className="button-content">
-                <UiIcon name="save" size={13} />
-                <span>Save New</span>
-              </span>
-            </AppButton>
-            <AppButton
-              onClick={() => void onUpdateCurrentSession()}
-              disabled={!canUpdateCurrentSession || isBlockingTaskActive}
-              title={selectedLocalPath === null ? "Update Current Session (disabled on presets)" : "Update Current Session"}
-            >
-              <span className="button-content">
-                <UiIcon name="refresh" size={13} />
-                <span>Update</span>
-              </span>
-            </AppButton>
+            {canUpdateCurrentSession ? (
+              <AppButton
+                onClick={() => void onUpdateCurrentSession()}
+                disabled={isBlockingTaskActive}
+                title="Update Current Session"
+              >
+                <span className="button-content">
+                  <UiIcon name="refresh" size={13} />
+                  <span>Update</span>
+                </span>
+              </AppButton>
+            ) : (
+              <AppButton
+                onClick={onSaveAsNewSession}
+                disabled={isBlockingTaskActive}
+                title="Save as New Session"
+              >
+                <span className="button-content">
+                  <UiIcon name="save" size={13} />
+                  <span>Save New</span>
+                </span>
+              </AppButton>
+            )}
+            <div className="header-menu-anchor" ref={settingsCopyActionsRef}>
+              <AppButton
+                variant="ghost"
+                className="header-menu-trigger is-text definition-session-actions-trigger"
+                aria-label="Session actions"
+                aria-haspopup="menu"
+                aria-expanded={settingsCopyActionsOpen}
+                onClick={() => setSettingsCopyActionsOpen((prev) => !prev)}
+                title="Session actions"
+              >
+                <span className="button-content">
+                  <span>Session ▾</span>
+                </span>
+              </AppButton>
+              {settingsCopyActionsOpen ? (
+                <div
+                  className="header-menu-popup"
+                  role="menu"
+                  aria-label="Session actions menu"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setSettingsCopyActionsOpen(false);
+                      onSaveAsNewSession();
+                    }}
+                    disabled={isBlockingTaskActive}
+                  >
+                    <span className="menu-item-content">
+                      <UiIcon name="copy" size={13} />
+                      <span>Duplicate Session...</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setSettingsCopyActionsOpen(false);
+                      void onCopySettingsToClipboard();
+                    }}
+                  >
+                    <span className="menu-item-content">
+                      <UiIcon name="copy" size={13} />
+                      <span>Copy Session JSON</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setSettingsCopyActionsOpen(false);
+                      void onPasteSettingsFromClipboard();
+                    }}
+                  >
+                    <span className="menu-item-content">
+                      <UiIcon name="paste" size={13} />
+                      <span>Paste Session JSON</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setSettingsCopyActionsOpen(false);
+                      void onDownloadSessionPng();
+                    }}
+                    disabled={parseResult === null || sessionPngExportInProgress || isBlockingTaskActive}
+                  >
+                    <span className="menu-item-content">
+                      <UiIcon name="download" size={13} />
+                      <span>{sessionPngExportInProgress ? "Exporting Session PNG..." : "Download Session PNG"}</span>
+                    </span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={onResetAllSettings}>
+                    <span className="menu-item-content">
+                      <UiIcon name="reset" size={13} />
+                      <span>Reset Session Settings</span>
+                    </span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
         <div className="definition-editor-panel">
@@ -5019,30 +5184,33 @@ export function App(): JSX.Element {
           />
         </div>
         <div className="section-actions">
-          <AppButton
-            onClick={() => setLegacyImportDialogOpen(true)}
-            disabled={isBlockingTaskActive}
-            title="Open legacy Fragmentarium fragment browser"
-          >
-            <span className="button-content">
-              <UiIcon name="import" size={13} />
-              <span>Legacy Fragmentarium import...</span>
-            </span>
-          </AppButton>
           <div className="header-menu-anchor section-actions-menu-anchor" ref={definitionActionsRef}>
             <AppButton
               variant="ghost"
-              className="header-menu-trigger definition-actions-more"
+              className="header-menu-trigger is-text definition-actions-more"
               aria-label="Fragment actions"
               aria-haspopup="menu"
               aria-expanded={definitionActionsOpen}
               onClick={() => setDefinitionActionsOpen((prev) => !prev)}
               title="More actions"
             >
-              ⋯
+              <span className="button-content">
+                <span>Code ▾</span>
+              </span>
             </AppButton>
             {definitionActionsOpen ? (
               <div className="header-menu-popup is-upward" role="menu" aria-label="Fragment actions menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setDefinitionActionsOpen(false);
+                    setLegacyImportDialogOpen(true);
+                  }}
+                  disabled={isBlockingTaskActive}
+                >
+                  Legacy Fragmentarium import...
+                </button>
                 <button type="button" role="menuitem" onClick={onBeautifySource}>
                   Beautify Fragment
                 </button>
@@ -5906,151 +6074,47 @@ export function App(): JSX.Element {
         />
       </section>
 
-      <div className="settings-toolbar-actions">
-        <div className="settings-copy-actions">
-          <div className="header-menu-anchor" ref={settingsCopyActionsRef}>
-            <AppButton
-              variant="ghost"
-              className="header-menu-trigger is-text"
-              aria-label="Session actions"
-              aria-haspopup="menu"
-              aria-expanded={settingsCopyActionsOpen}
-              onClick={() => setSettingsCopyActionsOpen((prev) => !prev)}
-            >
-              <span className="button-content">
-                <UiIcon name="session" size={13} />
-                <span>Session</span>
-              </span>
-            </AppButton>
-            {settingsCopyActionsOpen ? (
-              <div
-                className="header-menu-popup is-upward is-align-start"
-                role="menu"
-                aria-label="Session actions menu"
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setSettingsCopyActionsOpen(false);
-                    void onCopySettingsToClipboard();
-                  }}
-                >
-                  <span className="menu-item-content">
-                    <UiIcon name="copy" size={13} />
-                    <span>Copy Session JSON</span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setSettingsCopyActionsOpen(false);
-                    void onPasteSettingsFromClipboard();
-                  }}
-                >
-                  <span className="menu-item-content">
-                    <UiIcon name="paste" size={13} />
-                    <span>Paste Session JSON</span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setSettingsCopyActionsOpen(false);
-                    void onDownloadSessionPng();
-                  }}
-                  disabled={parseResult === null || sessionPngExportInProgress || isBlockingTaskActive}
-                >
-                  <span className="menu-item-content">
-                    <UiIcon name="download" size={13} />
-                    <span>{sessionPngExportInProgress ? "Exporting Session PNG..." : "Download Session PNG"}</span>
-                  </span>
-                </button>
-                <button type="button" role="menuitem" onClick={onResetAllSettings}>
-                  <span className="menu-item-content">
-                    <UiIcon name="reset" size={13} />
-                    <span>Reset Session Settings</span>
-                  </span>
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </div>
+    </div>
+  );
+
+  const timelinePane = timelineEnabled ? (
+    <div className="timeline-shell is-expanded" style={{ height: `${TIMELINE_PANEL_HEIGHT_PX}px` }}>
+      <div className="timeline-shell-panel">
+        {selectedTimeline !== null ? (
+          <TimelinePanel
+            keyframes={selectedTimeline.keyframes}
+            activeKeyId={selectedTimeline.activeKeyId}
+            playheadT={selectedTimeline.playheadT}
+            interpolation={selectedTimeline.interpolation}
+            graphLines={timelineGraphLines}
+            isPlaying={timelinePlaying}
+            playbackDurationSeconds={selectedTimeline.playbackDurationSeconds}
+            onPlaybackDurationChange={onTimelinePlaybackDurationChange}
+            onPlay={onTimelinePlay}
+            onPause={onTimelinePause}
+            onPrevKeyframe={() => onTimelineStepKeyframe("prev")}
+            onNextKeyframe={() => onTimelineStepKeyframe("next")}
+            onInterpolationChange={onTimelineInterpolationChange}
+            onScrubPreview={onTimelineScrubPreview}
+            onScrubCommit={onTimelineScrubCommit}
+            onActivateKeyframe={onTimelineActivateKeyframe}
+            onMoveKeyframe={onTimelineMoveKeyframe}
+            onMoveKeyframeEnd={onTimelineMoveKeyframeEnd}
+            onAddLeft={() => onTimelineAddKeyframe("left")}
+            onAddRight={() => onTimelineAddKeyframe("right")}
+            onDeleteActive={onTimelineDeleteActiveKey}
+            onFit={onTimelineFit}
+            modifyAllKeyframes={selectedTimeline.modifyAllKeyframes}
+            onModifyAllKeyframesChange={onTimelineModifyAllChange}
+          />
+        ) : (
+          <section className="timeline-panel section-block">
+            <p className="muted">Initializing timeline…</p>
+          </section>
+        )}
       </div>
     </div>
-  );
-
-  const timelineKeyframeCount = selectedTimeline?.keyframes.length ?? 0;
-  const timelineShellHeightPx =
-    timelineEnabled ? TIMELINE_PANEL_HEIGHT_PX + TIMELINE_RAIL_HEIGHT_PX : TIMELINE_RAIL_HEIGHT_PX;
-  const timelinePane = (
-    <div
-      className={`timeline-shell${timelineEnabled ? " is-expanded" : " is-collapsed"}`}
-      style={{ height: `${timelineShellHeightPx}px` }}
-    >
-      <section className="timeline-rail" aria-label="Timeline controls">
-        <div className="timeline-rail-main">
-          <UiIcon name="session" size={13} />
-          <span className="timeline-rail-label">Timeline</span>
-          <span className={`timeline-rail-badge${timelineKeyframeCount <= 0 ? " is-empty" : ""}`}>
-            {timelineKeyframeCount <= 0
-              ? "No keyframes yet"
-              : `${timelineKeyframeCount} key frame${timelineKeyframeCount === 1 ? "" : "s"}`}
-          </span>
-        </div>
-        <AppButton
-          className="timeline-rail-toggle-button"
-          onClick={() => onTimelineToggle(!timelineEnabled)}
-          disabled={isBlockingTaskActive}
-          title={timelineEnabled ? "Hide timeline panel" : "Show timeline panel"}
-        >
-          <span className="button-content">
-            <span aria-hidden="true">{timelineEnabled ? "▴" : "▾"}</span>
-            <span>{timelineEnabled ? "Hide timeline" : "Show timeline"}</span>
-          </span>
-        </AppButton>
-      </section>
-
-      {timelineEnabled ? (
-        <div className="timeline-shell-panel">
-          {selectedTimeline !== null ? (
-            <TimelinePanel
-              keyframes={selectedTimeline.keyframes}
-              activeKeyId={selectedTimeline.activeKeyId}
-              playheadT={selectedTimeline.playheadT}
-              interpolation={selectedTimeline.interpolation}
-              graphLines={timelineGraphLines}
-              isPlaying={timelinePlaying}
-              playbackDurationSeconds={selectedTimeline.playbackDurationSeconds}
-              onPlaybackDurationChange={onTimelinePlaybackDurationChange}
-              onPlay={onTimelinePlay}
-              onPause={onTimelinePause}
-              onPrevKeyframe={() => onTimelineStepKeyframe("prev")}
-              onNextKeyframe={() => onTimelineStepKeyframe("next")}
-              onInterpolationChange={onTimelineInterpolationChange}
-              onScrubPreview={onTimelineScrubPreview}
-              onScrubCommit={onTimelineScrubCommit}
-              onActivateKeyframe={onTimelineActivateKeyframe}
-              onMoveKeyframe={onTimelineMoveKeyframe}
-              onMoveKeyframeEnd={onTimelineMoveKeyframeEnd}
-              onAddLeft={() => onTimelineAddKeyframe("left")}
-              onAddRight={() => onTimelineAddKeyframe("right")}
-              onDeleteActive={onTimelineDeleteActiveKey}
-              onFit={onTimelineFit}
-              modifyAllKeyframes={selectedTimeline.modifyAllKeyframes}
-              onModifyAllKeyframesChange={onTimelineModifyAllChange}
-            />
-          ) : (
-            <section className="timeline-panel section-block">
-              <p className="muted">Initializing timeline…</p>
-            </section>
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
+  ) : null;
 
   return (
     <div
@@ -6079,14 +6143,36 @@ export function App(): JSX.Element {
         </div>
         <div className="topbar-actions">
           <AppButton
+            className={`topbar-timeline-button${timelineEnabled ? " is-active" : ""}`}
+            onClick={() => onTimelineToggle(!timelineEnabled)}
+            disabled={isBlockingTaskActive}
+            title={timelineEnabled ? "Hide timeline panel" : "Show timeline panel"}
+          >
+            <span className="button-content">
+              <UiIcon name="session" size={13} />
+              <span>{timelineEnabled ? "Hide timeline" : "Show timeline"}</span>
+            </span>
+          </AppButton>
+          <AppButton
             variant="primary"
             className="topbar-export-button"
-            onClick={onOpenExportDialog}
+            onClick={() => onOpenExportDialog("still")}
             disabled={isBlockingTaskActive}
           >
             <span className="button-content">
               <UiIcon name="export" size={13} />
-              <span>Export Render...</span>
+              <span>Export Image...</span>
+            </span>
+          </AppButton>
+          <AppButton
+            variant="primary"
+            className="topbar-export-button"
+            onClick={() => onOpenExportDialog("animation")}
+            disabled={isBlockingTaskActive}
+          >
+            <span className="button-content">
+              <UiIcon name="export" size={13} />
+              <span>Export Anim...</span>
             </span>
           </AppButton>
           <AppButton onClick={() => setHelpDialogOpen(true)} disabled={isBlockingTaskActive}>
@@ -6211,13 +6297,15 @@ export function App(): JSX.Element {
       <ExportRenderDialog
         open={exportDialogState !== null}
         canAnimate={timelineHasAnimation}
+        timelineKeyframeCount={selectedTimeline?.keyframes.length ?? 0}
         mode={exportDialogState?.mode ?? "still"}
         width={exportDialogState?.width ?? 1920}
         height={exportDialogState?.height ?? 1080}
         aspectRatioLocked={exportDialogState?.aspectRatioLocked ?? true}
         aspectRatio={exportDialogState?.aspectRatio ?? ((exportDialogState?.width ?? 1920) / Math.max(1, exportDialogState?.height ?? 1080))}
         subframes={exportDialogState?.subframes ?? Math.max(1, renderSettings.maxSubframes || 30)}
-        frameCount={exportDialogState?.frameCount ?? 100}
+        animationDurationSeconds={exportDialogState?.animationDurationSeconds ?? 3}
+        animationFormat={exportDialogState?.animationFormat ?? "movie"}
         movieSupported={webCodecsMovieAvailable}
         movieUnavailableReason={
           webCodecsMovieAvailable ? null : "WebCodecs VideoEncoder is not available in this browser context."
@@ -6233,30 +6321,17 @@ export function App(): JSX.Element {
         onStartExport={() => void onStartExportRender()}
         onStartMovieExport={() => void onStartMovieExportRender()}
         onCancelExport={onCancelExportRender}
-        onModeChange={(mode) => {
-          updateExportDialogState({
-            mode,
-            statusMessage: null
-          });
-        }}
         onWidthChange={onExportWidthChange}
         onHeightChange={onExportHeightChange}
         onAspectRatioLockChange={onExportAspectRatioLockChange}
         onSubframesChange={(value) =>
           updateExportDialogState({ subframes: Math.max(1, value), statusMessage: null })
         }
-        onFrameCountChange={(value) =>
-          setExportDialogState((prev) => {
-            if (prev === null) {
-              return prev;
-            }
-            const nextFrameCount = Math.max(1, value);
-            return {
-              ...prev,
-              frameCount: nextFrameCount,
-              statusMessage: null
-            };
-          })
+        onAnimationDurationSecondsChange={(value) =>
+          updateExportDialogState({ animationDurationSeconds: Math.max(0.1, value), statusMessage: null })
+        }
+        onAnimationFormatChange={(animationFormat) =>
+          updateExportDialogState({ animationFormat, statusMessage: null })
         }
         onMovieCodecChange={(codec) => updateExportDialogState({ movieCodec: codec, statusMessage: null })}
         onMovieFpsChange={(value) => updateExportDialogState({ movieFps: Math.max(1, value), statusMessage: null })}
@@ -6266,6 +6341,8 @@ export function App(): JSX.Element {
         onMovieKeyframeIntervalChange={(value) =>
           updateExportDialogState({ movieKeyframeInterval: Math.max(1, value), statusMessage: null })
         }
+        onApplySizePreset={onApplyExportSizePreset}
+        onApplyQualityPreset={onApplyExportQualityPreset}
       />
       <SessionGalleryDialog
         open={sessionGalleryOpen}
