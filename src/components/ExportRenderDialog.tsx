@@ -25,6 +25,7 @@ export interface ExportRenderDialogProps {
   aspectRatioLocked: boolean;
   aspectRatio: number;
   subframes: number;
+  embedPresetInImage: boolean;
   animationDurationSeconds: number;
   animationFormat: ExportAnimationFormat;
   movieSupported: boolean;
@@ -44,6 +45,7 @@ export interface ExportRenderDialogProps {
   onHeightChange: (value: number) => void;
   onAspectRatioLockChange: (locked: boolean) => void;
   onSubframesChange: (value: number) => void;
+  onEmbedPresetInImageChange: (enabled: boolean) => void;
   onAnimationDurationSecondsChange: (value: number) => void;
   onAnimationFormatChange: (format: ExportAnimationFormat) => void;
   onMovieCodecChange: (codec: WebCodecsMovieCodec) => void;
@@ -335,10 +337,33 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
             </div>
             <p className="muted">
               {animationMode
-                ? "Quality presets target 5 / 25 / 50 total frames (Draft / Balanced / Final) and update encoding strength."
+                ? "Quality presets set subframes/FPS to 5/10, 15/20, and 30/30 (Draft / Balanced / Final)."
                 : "Higher subframes reduce noise but increase render time."}
             </p>
           </section>
+
+          {!animationMode ? (
+            <section className="export-section">
+              <div className="section-header-row">
+                <h3>Metadata</h3>
+              </div>
+              <div className="export-grid export-grid-output">
+                <label className="modal-field">
+                  <span className="uniform-label">Embed Preset in Image</span>
+                  <div className="uniform-bool export-aspect-lock">
+                    <span>{props.embedPresetInImage ? "On" : "Off"}</span>
+                    <ToggleSwitch
+                      checked={props.embedPresetInImage}
+                      disabled={props.isExporting}
+                      ariaLabel="Embed preset in image"
+                      onChange={props.onEmbedPresetInImageChange}
+                    />
+                  </div>
+                </label>
+              </div>
+              <p className="muted">Stores preset/session data in PNG metadata for later import.</p>
+            </section>
+          ) : null}
 
           {animationMode ? (
             <>

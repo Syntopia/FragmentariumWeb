@@ -22,6 +22,8 @@ export interface SessionGalleryItem {
   sourceKind: "local" | "github";
   localPath?: string;
   remotePngUrl?: string;
+  remoteSessionJson?: string;
+  externalSourceUrl?: string;
 }
 
 export interface SessionGalleryExternalSource {
@@ -51,6 +53,7 @@ interface SessionGalleryDialogProps {
   onClose: () => void;
   onOpenSession: (item: SessionGalleryItem) => void;
   onDeleteSession: (path: string) => void;
+  onDeleteSessions: (paths: string[]) => Promise<void> | void;
   onRenameSession: (fromPath: string, toPath: string) => Promise<void> | void;
   onRequestPersistentStorage: () => Promise<void> | void;
   onExportAll: () => void;
@@ -68,6 +71,11 @@ interface GalleryFolderNode {
   itemCount: number;
   directItemCount: number;
   externalSource: SessionGalleryExternalSource | null;
+}
+
+interface PendingFolderDeleteState {
+  folderPath: string;
+  localPaths: string[];
 }
 
 const DEFAULT_THUMB_SIZE = 184;
@@ -376,6 +384,9 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
   const [addExternalInProgress, setAddExternalInProgress] = useState(false);
   const [externalUrlError, setExternalUrlError] = useState<string | null>(null);
   const [externalAddDialogOpen, setExternalAddDialogOpen] = useState(false);
+  const [pendingFolderDelete, setPendingFolderDelete] = useState<PendingFolderDeleteState | null>(null);
+  const [folderDeleteInProgress, setFolderDeleteInProgress] = useState(false);
+  const [folderDeleteError, setFolderDeleteError] = useState<string | null>(null);
 
   const sortedItems = useMemo(
     () => [...props.items].sort((a, b) => a.path.localeCompare(b.path)),
@@ -404,6 +415,31 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
     () => sortedItems.find((item) => item.path === selectedSessionPath) ?? null,
     [selectedSessionPath, sortedItems]
   );
+  const localPathsByFolderPath = useMemo(() => {
+    const map = new Map<string, string[]>();
+    const append = (folderPath: string, localPath: string): void => {
+      const existing = map.get(folderPath);
+      if (existing === undefined) {
+        map.set(folderPath, [localPath]);
+        return;
+      }
+      existing.push(localPath);
+    };
+
+    for (const item of sortedItems) {
+      if (item.sourceKind !== "local" || item.localPath === undefined) {
+        continue;
+      }
+      const segments = item.path.split("/").filter((segment) => segment.length > 0);
+      let folderPath = "";
+      for (let index = 0; index < Math.max(0, segments.length - 1); index += 1) {
+        folderPath = folderPath.length === 0 ? segments[index] as string : `${folderPath}/${segments[index] as string}`;
+        append(folderPath, item.localPath);
+      }
+    }
+
+    return map;
+  }, [sortedItems]);
 
   useEffect(() => {
     if (!props.open) {
@@ -453,6 +489,9 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
     setExternalUrlError(null);
     setAddExternalInProgress(false);
     setExternalAddDialogOpen(false);
+    setPendingFolderDelete(null);
+    setFolderDeleteInProgress(false);
+    setFolderDeleteError(null);
     zipDropDepthRef.current = 0;
   }, [props.open]);
 
@@ -471,6 +510,10 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
   const renderFolderNode = (node: GalleryFolderNode, depth: number): JSX.Element => {
     const isSelected = node.path === selectedFolderPath;
     const externalSource = node.externalSource;
+    const folderLocalPaths = localPathsByFolderPath.get(node.path) ?? [];
+    const isLocalFolder =
+      node.path === LOCAL_SESSION_GALLERY_ROOT_LABEL || node.path.startsWith(`${LOCAL_SESSION_GALLERY_ROOT_LABEL}/`);
+    const canDeleteFolderLocalSessions = externalSource === null && isLocalFolder && folderLocalPaths.length > 0;
     const folderCountClassName =
       externalSource === null
         ? "session-gallery-folder-count"
@@ -537,6 +580,31 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
                 {externalSourceCountBadgeLabel(externalSource)}
               </span>
             </>
+          ) : null}
+          {canDeleteFolderLocalSessions ? (
+            <div className="session-gallery-folder-row-actions">
+              <AppButton
+                variant="ghost"
+                className="session-gallery-folder-row-action session-gallery-folder-row-action-delete-local"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setPendingFolderDelete({
+                    folderPath: node.path,
+                    localPaths: folderLocalPaths
+                  });
+                  setFolderDeleteError(null);
+                }}
+                disabled={props.isBusy || folderDeleteInProgress}
+                aria-label={`Delete all local sessions in ${node.path}`}
+                title={`Delete ${folderLocalPaths.length} local session${folderLocalPaths.length === 1 ? "" : "s"} in '${node.path}'.`}
+              >
+                <span className="session-gallery-folder-delete-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                    <path d="M6 2h4l.7 1.2H14v1.4H2V3.2h3.3zM4.2 6h1.3v6.2H4.2zm3.15 0h1.3v6.2h-1.3zm3.15 0h1.3v6.2h-1.3z" />
+                  </svg>
+                </span>
+              </AppButton>
+            </div>
           ) : null}
         </div>
         {node.children.map((child) => renderFolderNode(child, depth + 1))}
@@ -667,6 +735,36 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
     }
     setExternalAddDialogOpen(false);
     setExternalUrlError(null);
+  };
+
+  const closeFolderDeleteDialog = (): void => {
+    if (folderDeleteInProgress) {
+      return;
+    }
+    setPendingFolderDelete(null);
+    setFolderDeleteError(null);
+  };
+
+  const confirmFolderDelete = async (): Promise<void> => {
+    if (pendingFolderDelete === null || folderDeleteInProgress || props.isBusy) {
+      return;
+    }
+    if (pendingFolderDelete.localPaths.length === 0) {
+      setPendingFolderDelete(null);
+      setFolderDeleteError(null);
+      return;
+    }
+    setFolderDeleteError(null);
+    setFolderDeleteInProgress(true);
+    try {
+      await props.onDeleteSessions(pendingFolderDelete.localPaths);
+      setPendingFolderDelete(null);
+      setFolderDeleteError(null);
+    } catch (error) {
+      setFolderDeleteError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFolderDeleteInProgress(false);
+    }
   };
 
   const onStartSidebarResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
@@ -960,7 +1058,7 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
                 }}
                 disabled={props.isBusy || addExternalInProgress}
               >
-                Add External GitHub Folder...
+                Add External GitHub Source...
               </AppButton>
             </div>
           </div>
@@ -1093,14 +1191,14 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
               aria-labelledby="session-gallery-add-source-title"
             >
               <div className="session-gallery-submodal-header">
-                <h4 id="session-gallery-add-source-title">Add External GitHub Folder</h4>
+                <h4 id="session-gallery-add-source-title">Add External GitHub Source</h4>
               </div>
               <label className="session-gallery-submodal-field">
-                <span className="muted">GitHub folder URL</span>
+                <span className="muted">GitHub URL (tree folder or ZIP)</span>
                 <input
                   type="text"
                   className="modal-input"
-                  placeholder="https://github.com/owner/repo/tree/branch/folder"
+                  placeholder="https://github.com/owner/repo/tree/branch/folder OR .../session-gallery.zip"
                   value={externalUrlInput}
                   autoFocus
                   disabled={props.isBusy || addExternalInProgress}
@@ -1132,6 +1230,42 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
                   {addExternalInProgress ? "Adding..." : "Add"}
                 </AppButton>
                 <AppButton onClick={closeExternalAddDialog} disabled={addExternalInProgress}>Cancel</AppButton>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {pendingFolderDelete !== null ? (
+          <div className="session-gallery-submodal-backdrop">
+            <div
+              className="session-gallery-submodal-window session-gallery-delete-submodal-window"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="session-gallery-delete-folder-title"
+            >
+              <div className="session-gallery-submodal-header">
+                <h4 id="session-gallery-delete-folder-title">Delete Folder Sessions</h4>
+              </div>
+              <p className="session-gallery-submodal-copy">
+                Delete all local sessions in{" "}
+                <strong>{pendingFolderDelete.folderPath}</strong>?
+              </p>
+              <p className="session-gallery-submodal-copy muted">
+                This will remove {pendingFolderDelete.localPaths.length} session
+                {pendingFolderDelete.localPaths.length === 1 ? "" : "s"} from local storage.
+              </p>
+              {folderDeleteError !== null ? <p className="dialog-error session-gallery-external-error">{folderDeleteError}</p> : null}
+              <div className="session-gallery-submodal-actions">
+                <AppButton
+                  variant="danger"
+                  onClick={() => void confirmFolderDelete()}
+                  disabled={folderDeleteInProgress || props.isBusy}
+                >
+                  {folderDeleteInProgress
+                    ? "Deleting..."
+                    : `Delete ${pendingFolderDelete.localPaths.length} Session${pendingFolderDelete.localPaths.length === 1 ? "" : "s"}`}
+                </AppButton>
+                <AppButton onClick={closeFolderDeleteDialog} disabled={folderDeleteInProgress}>Cancel</AppButton>
               </div>
             </div>
           </div>

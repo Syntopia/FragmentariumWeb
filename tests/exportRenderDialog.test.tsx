@@ -16,6 +16,7 @@ function makeProps(overrides?: Partial<ExportRenderDialogProps>): ExportRenderDi
     aspectRatioLocked: true,
     aspectRatio: 16 / 9,
     subframes: 3,
+    embedPresetInImage: true,
     animationDurationSeconds: 1.5,
     animationFormat: "movie",
     movieSupported: true,
@@ -35,6 +36,7 @@ function makeProps(overrides?: Partial<ExportRenderDialogProps>): ExportRenderDi
     onHeightChange: () => undefined,
     onAspectRatioLockChange: () => undefined,
     onSubframesChange: () => undefined,
+    onEmbedPresetInImageChange: () => undefined,
     onAnimationDurationSecondsChange: () => undefined,
     onAnimationFormatChange: () => undefined,
     onMovieCodecChange: () => undefined,
@@ -94,6 +96,7 @@ describe("ExportRenderDialog", () => {
     expect(dialog.getByText("Export Image")).toBeInTheDocument();
     expect(dialog.queryByText("Animation timing")).not.toBeInTheDocument();
     expect(dialog.queryByText("Encoding")).not.toBeInTheDocument();
+    expect(dialog.getByText("Embed Preset in Image")).toBeInTheDocument();
     expect(dialog.getByRole("button", { name: "Export PNG" })).toBeEnabled();
   });
 });

@@ -1,4 +1,8 @@
+import { parseSessionGalleryZipV2 } from "./sessionGalleryZip";
+import { parseZipStore } from "./zipStore";
+
 export interface GitHubGalleryTreeSource {
+  kind: "tree";
   id: string;
   url: string;
   owner: string;
@@ -10,11 +14,29 @@ export interface GitHubGalleryTreeSource {
   sourceLabel: string;
 }
 
+export interface GitHubGalleryZipSource {
+  kind: "zip";
+  id: string;
+  url: string;
+  sourceTreePath: string;
+  sourceLabel: string;
+}
+
+export type GitHubGallerySource = GitHubGalleryTreeSource | GitHubGalleryZipSource;
+
 export interface GitHubGalleryPngEntry {
   relativePath: string;
   repoPath: string;
   downloadUrl: string;
   fileName: string;
+}
+
+export interface GitHubGalleryZipSessionEntry {
+  relativePath: string;
+  sessionJson: string;
+  previewImageBytes: Uint8Array;
+  previewImageMimeType: string;
+  updatedAtMs: number;
 }
 
 interface GitHubContentsDirEntry {
@@ -28,12 +50,18 @@ interface GitHubFetchLikeResponse {
   ok: boolean;
   status: number;
   statusText: string;
-  json(): Promise<unknown>;
+  json?: () => Promise<unknown>;
+  arrayBuffer?: () => Promise<ArrayBuffer>;
 }
 
 export type GitHubFetchLike = (input: string, init?: RequestInit) => Promise<GitHubFetchLikeResponse>;
 
-const GITHUB_HOSTS = new Set(["github.com", "www.github.com"]);
+const GITHUB_HOSTS = new Set([
+  "github.com",
+  "www.github.com",
+  "raw.githubusercontent.com",
+  "objects.githubusercontent.com"
+]);
 
 function encodeRepoPath(path: string): string {
   if (path.length === 0) {
@@ -89,10 +117,39 @@ async function fetchGitHubJsonOrThrow(fetchImpl: GitHubFetchLike, url: string): 
   if (!response.ok) {
     throw new Error(`GitHub API request failed (${response.status} ${response.statusText}) for '${url}'.`);
   }
+  if (typeof response.json !== "function") {
+    throw new Error(`GitHub API response did not expose JSON for '${url}'.`);
+  }
   return await response.json();
 }
 
-export function parseGitHubGalleryTreeUrl(inputUrl: string): GitHubGalleryTreeSource {
+async function fetchArrayBufferOrThrow(fetchImpl: GitHubFetchLike, url: string): Promise<ArrayBuffer> {
+  const response = await fetchImpl(url, {
+    method: "GET"
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub ZIP request failed (${response.status} ${response.statusText}) for '${url}'.`);
+  }
+  if (typeof response.arrayBuffer !== "function") {
+    throw new Error(`GitHub ZIP response did not expose binary payload for '${url}'.`);
+  }
+  return await response.arrayBuffer();
+}
+
+function parseZipSource(inputUrl: string, parsedUrl: URL): GitHubGalleryZipSource {
+  const rawLabel = decodeURIComponent(parsedUrl.pathname.split("/").filter((segment) => segment.length > 0).at(-1) ?? "gallery.zip");
+  const sourceLabel = `zip:${parsedUrl.hostname}/${rawLabel}`;
+  const sourceTreePath = `GitHub/${sourceLabel}`;
+  return {
+    kind: "zip",
+    id: `github-zip:${parsedUrl.toString()}`,
+    url: inputUrl,
+    sourceTreePath,
+    sourceLabel
+  };
+}
+
+export function parseGitHubGalleryTreeUrl(inputUrl: string): GitHubGallerySource {
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(inputUrl);
@@ -104,13 +161,17 @@ export function parseGitHubGalleryTreeUrl(inputUrl: string): GitHubGalleryTreeSo
     throw new Error("GitHub gallery source URL must use http or https.");
   }
   if (!GITHUB_HOSTS.has(parsedUrl.hostname.toLowerCase())) {
-    throw new Error("GitHub gallery source URL must be a github.com repository tree URL.");
+    throw new Error("GitHub gallery source URL must be a GitHub tree URL or a GitHub-hosted ZIP URL.");
+  }
+
+  if (parsedUrl.pathname.toLowerCase().endsWith(".zip")) {
+    return parseZipSource(inputUrl, parsedUrl);
   }
 
   const rawSegments = parsedUrl.pathname.split("/").filter((segment) => segment.length > 0);
   const segments = rawSegments.map((segment) => decodeURIComponent(segment));
   if (segments.length < 4) {
-    throw new Error("GitHub gallery source URL must look like /owner/repo/tree/branch[/path].");
+    throw new Error("GitHub gallery source URL must look like /owner/repo/tree/branch[/path] or end with .zip.");
   }
 
   const [owner, repo, treeLiteral, branch, ...pathSegments] = segments;
@@ -125,6 +186,7 @@ export function parseGitHubGalleryTreeUrl(inputUrl: string): GitHubGalleryTreeSo
   const sourceTreePath = `GitHub/${owner}/${repo}/${branch}${normalizedPath.length > 0 ? `/${normalizedPath}` : ""}`;
 
   return {
+    kind: "tree",
     id: `github:${owner}/${repo}@${branch}:${normalizedPath}`,
     url: inputUrl,
     owner,
@@ -174,4 +236,25 @@ export async function listGitHubGalleryPngEntries(
   await walkDirectory(source.path);
   results.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
   return results;
+}
+
+export async function listGitHubGalleryZipSessionEntries(
+  source: GitHubGalleryZipSource,
+  fetchImpl: GitHubFetchLike = fetch as unknown as GitHubFetchLike
+): Promise<GitHubGalleryZipSessionEntry[]> {
+  const zipBytes = new Uint8Array(await fetchArrayBufferOrThrow(fetchImpl, source.url));
+  const zipEntries = parseZipStore(zipBytes).filter((entry) => !entry.name.endsWith("/"));
+  const parsed = parseSessionGalleryZipV2(zipEntries);
+  if (parsed === null) {
+    throw new Error(`ZIP source '${source.sourceLabel}' is missing a v2 session gallery manifest.`);
+  }
+  return parsed
+    .map((entry) => ({
+      relativePath: entry.path,
+      sessionJson: entry.sessionJson,
+      previewImageBytes: entry.previewImageBytes,
+      previewImageMimeType: entry.previewImageMimeType,
+      updatedAtMs: entry.updatedAtMs
+    }))
+    .sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }

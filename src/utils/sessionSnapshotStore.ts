@@ -1,19 +1,23 @@
 export interface SessionSnapshotRecord {
   path: string;
-  pngBlob: Blob;
+  previewImageBlob: Blob;
+  previewImageMimeType: string;
+  sessionJson: string;
   createdAtMs: number;
   updatedAtMs: number;
 }
 
 interface SessionSnapshotDbRecord {
   path: string;
-  pngBlob: Blob;
+  previewImageBlob: Blob;
+  previewImageMimeType: string;
+  sessionJson: string;
   createdAtMs?: number;
   updatedAtMs: number;
 }
 
-const DB_NAME = "fragmentarium-web-session-snapshots-v1";
-const DB_VERSION = 2;
+const DB_NAME = "fragmentarium-web-session-snapshots-v2";
+const DB_VERSION = 1;
 const STORE_NAME = "sessionSnapshots";
 
 function getIndexedDbOrThrow(): IDBFactory {
@@ -136,12 +140,18 @@ export async function listSessionSnapshotRecords(): Promise<SessionSnapshotRecor
             (typeof record.createdAtMs === "number" && Number.isFinite(record.createdAtMs))) &&
           typeof record.updatedAtMs === "number" &&
           Number.isFinite(record.updatedAtMs) &&
-          record.pngBlob instanceof Blob
+          record.previewImageBlob instanceof Blob &&
+          typeof record.previewImageMimeType === "string" &&
+          record.previewImageMimeType.trim().length > 0 &&
+          typeof record.sessionJson === "string" &&
+          record.sessionJson.trim().length > 0
       )
       .sort((a, b) => a.path.localeCompare(b.path))
       .map((record) => ({
         path: record.path,
-        pngBlob: record.pngBlob,
+        previewImageBlob: record.previewImageBlob,
+        previewImageMimeType: record.previewImageMimeType,
+        sessionJson: record.sessionJson,
         createdAtMs: typeof record.createdAtMs === "number" && Number.isFinite(record.createdAtMs)
           ? record.createdAtMs
           : record.updatedAtMs,
@@ -154,8 +164,14 @@ export async function putSessionSnapshotRecord(record: SessionSnapshotRecord): P
   if (record.path.trim().length === 0) {
     throw new Error("Session snapshot path cannot be empty.");
   }
-  if (!(record.pngBlob instanceof Blob)) {
-    throw new Error("Session snapshot PNG must be a Blob.");
+  if (!(record.previewImageBlob instanceof Blob)) {
+    throw new Error("Session snapshot preview image must be a Blob.");
+  }
+  if (record.previewImageMimeType.trim().length === 0) {
+    throw new Error("Session snapshot preview image MIME type cannot be empty.");
+  }
+  if (record.sessionJson.trim().length === 0) {
+    throw new Error("Session snapshot sessionJson cannot be empty.");
   }
   if (!Number.isFinite(record.createdAtMs)) {
     throw new Error("Session snapshot createdAtMs must be finite.");
@@ -167,7 +183,9 @@ export async function putSessionSnapshotRecord(record: SessionSnapshotRecord): P
   await withStore("readwrite", (store) => {
     store.put({
       path: record.path,
-      pngBlob: record.pngBlob,
+      previewImageBlob: record.previewImageBlob,
+      previewImageMimeType: record.previewImageMimeType,
+      sessionJson: record.sessionJson,
       createdAtMs: record.createdAtMs,
       updatedAtMs: record.updatedAtMs
     } satisfies SessionSnapshotDbRecord);
