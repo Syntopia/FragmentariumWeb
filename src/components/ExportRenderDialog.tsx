@@ -11,7 +11,7 @@ export interface ExportRenderDialogProgress {
   stageLabel: string;
 }
 
-export type ExportAnimationFormat = "movie" | "png-zip";
+export type ExportAnimationFormat = "movie" | "png-zip" | "render-manifest";
 export type ExportSizePresetId = "viewport" | "hd" | "4k" | "square";
 export type ExportQualityPresetId = "draft" | "balanced" | "final";
 
@@ -40,6 +40,7 @@ export interface ExportRenderDialogProps {
   onClose: () => void;
   onStartExport: () => void;
   onStartMovieExport: () => void;
+  onStartManifestExport: () => void;
   onCancelExport: () => void;
   onWidthChange: (value: number) => void;
   onHeightChange: (value: number) => void;
@@ -182,22 +183,31 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
     props.movieFps <= 0 || props.movieBitrateMbps <= 0 || props.movieKeyframeInterval <= 0;
   const movieExportDisabled = baseExportDisabled || !animationMode || !props.movieSupported || movieConfigInvalid;
   const pngZipExportDisabled = baseExportDisabled || !animationMode;
+  const renderManifestExportDisabled = baseExportDisabled || !animationMode;
   const stillExportDisabled = baseExportDisabled || animationMode;
 
   const primaryIsMovie = animationMode && props.animationFormat === "movie";
+  const primaryIsManifest = animationMode && props.animationFormat === "render-manifest";
   const primaryExportDisabled = animationMode
     ? primaryIsMovie
       ? movieExportDisabled
-      : pngZipExportDisabled
+      : primaryIsManifest
+        ? renderManifestExportDisabled
+        : pngZipExportDisabled
     : stillExportDisabled;
 
   const estimatedStill = formatBytes(estimateStillPngBytes(props.width, props.height));
   const estimatedZip = formatBytes(estimateAnimationZipBytes(props.width, props.height, derivedFrameCount));
   const estimatedMovie = formatBytes(estimateMovieBytes(durationSeconds, props.movieBitrateMbps));
+  const estimatedManifest = formatBytes(Math.max(64 * 1024, derivedFrameCount * 12 * 1024));
 
   const estimateSummary = animationMode
     ? `Estimated: ${derivedFrameCount} frames, ${formatDurationLabel(durationSeconds)} at ${fps} FPS, ${
-        props.animationFormat === "movie" ? `~${estimatedMovie} WebM` : `~${estimatedZip} PNG ZIP`
+        props.animationFormat === "movie"
+          ? `~${estimatedMovie} WebM`
+          : props.animationFormat === "render-manifest"
+            ? `~${estimatedManifest} Render JSON`
+            : `~${estimatedZip} PNG ZIP`
       }`
     : `Estimated: ~${estimatedStill} PNG at ${props.width}×${props.height}`;
 
@@ -323,6 +333,17 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
                 />
               </label>
             </div>
+            {!animationMode ? (
+              <div className="export-inline-option-row">
+                <span className="uniform-label">Embed preset in PNG metadata</span>
+                <ToggleSwitch
+                  checked={props.embedPresetInImage}
+                  disabled={props.isExporting}
+                  ariaLabel="Embed preset in image"
+                  onChange={props.onEmbedPresetInImageChange}
+                />
+              </div>
+            ) : null}
           </section>
 
           <section className="export-section">
@@ -341,29 +362,6 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
                 : "Higher subframes reduce noise but increase render time."}
             </p>
           </section>
-
-          {!animationMode ? (
-            <section className="export-section">
-              <div className="section-header-row">
-                <h3>Metadata</h3>
-              </div>
-              <div className="export-grid export-grid-output">
-                <label className="modal-field">
-                  <span className="uniform-label">Embed Preset in Image</span>
-                  <div className="uniform-bool export-aspect-lock">
-                    <span>{props.embedPresetInImage ? "On" : "Off"}</span>
-                    <ToggleSwitch
-                      checked={props.embedPresetInImage}
-                      disabled={props.isExporting}
-                      ariaLabel="Embed preset in image"
-                      onChange={props.onEmbedPresetInImageChange}
-                    />
-                  </div>
-                </label>
-              </div>
-              <p className="muted">Stores preset/session data in PNG metadata for later import.</p>
-            </section>
-          ) : null}
 
           {animationMode ? (
             <>
@@ -439,6 +437,13 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
                   >
                     PNG ZIP
                   </AppButton>
+                  <AppButton
+                    className={props.animationFormat === "render-manifest" ? "is-selected" : ""}
+                    onClick={() => props.onAnimationFormatChange("render-manifest")}
+                    disabled={props.isExporting}
+                  >
+                    Render JSON
+                  </AppButton>
                 </div>
                 {props.animationFormat === "movie" ? (
                   props.movieSupported ? (
@@ -492,7 +497,13 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
                     </p>
                   )
                 ) : (
-                  <p className="muted">PNG ZIP exports every rendered frame as lossless image files.</p>
+                  props.animationFormat === "png-zip" ? (
+                    <p className="muted">PNG ZIP exports every rendered frame as lossless image files.</p>
+                  ) : (
+                    <p className="muted">
+                      Render JSON exports a precomposed native animation manifest for <code>frag-render</code>.
+                    </p>
+                  )
                 )}
               </section>
             </>
@@ -543,17 +554,27 @@ export function ExportRenderDialog(props: ExportRenderDialogProps): JSX.Element 
                       <AppButton onClick={props.onStartExport} disabled={pngZipExportDisabled}>
                         Export PNG ZIP
                       </AppButton>
-                    ) : (
+                    ) : primaryIsManifest ? (
                       <AppButton onClick={props.onStartMovieExport} disabled={movieExportDisabled}>
                         Export Movie
+                      </AppButton>
+                    ) : (
+                      <AppButton onClick={props.onStartManifestExport} disabled={renderManifestExportDisabled}>
+                        Export Render JSON
                       </AppButton>
                     )}
                     <AppButton
                       variant="primary"
-                      onClick={primaryIsMovie ? props.onStartMovieExport : props.onStartExport}
+                      onClick={
+                        primaryIsMovie
+                          ? props.onStartMovieExport
+                          : primaryIsManifest
+                            ? props.onStartManifestExport
+                            : props.onStartExport
+                      }
                       disabled={primaryExportDisabled}
                     >
-                      {primaryIsMovie ? "Export Movie" : "Export PNG ZIP"}
+                      {primaryIsMovie ? "Export Movie" : primaryIsManifest ? "Export Render JSON" : "Export PNG ZIP"}
                     </AppButton>
                   </>
                 ) : (

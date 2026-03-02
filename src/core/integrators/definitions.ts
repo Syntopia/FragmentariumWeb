@@ -606,6 +606,10 @@ uniform int uIntegrator_directLight;
 uniform float uIntegrator_sunStrength;
 uniform float uIntegrator_skyStrength;
 uniform float uIntegrator_fog;
+uniform int uIntegrator_fogEnabled;
+uniform float uIntegrator_fogColorR;
+uniform float uIntegrator_fogColorG;
+uniform float uIntegrator_fogColorB;
 uniform float uIntegrator_sunAngularDiameterDeg;
 uniform int uIntegrator_areaLightEnabled;
 uniform float uIntegrator_areaLightIntensity;
@@ -1003,6 +1007,14 @@ vec3 environmentRadiancePT(vec3 rd) {
   return skyRadiance(rd);
 }
 
+vec3 fogColorPT() {
+  return clamp(
+    vec3(uIntegrator_fogColorR, uIntegrator_fogColorG, uIntegrator_fogColorB),
+    vec3(0.0),
+    vec3(1.0)
+  );
+}
+
 vec3 sunRadiance(vec3 rd) {
   float cosThetaMax = sunCosThetaMaxPT();
   float align = dot(normalize(rd), sunDirectionPT());
@@ -1116,7 +1128,6 @@ vec3 renderColor(vec3 ro, vec3 rd) {
   vec3 origin = ro;
   vec3 direction = normalize(rd);
   float lastPdf = 0.0;
-  float primaryHitDistance = -1.0;
 
   for (int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
     if (bounce >= uIntegrator_bounceCount) {
@@ -1127,46 +1138,48 @@ vec3 renderColor(vec3 ro, vec3 rd) {
     vec3 hitNormal;
     float hitT;
     bool hit = traceDE(origin, direction, hitPos, hitNormal, hitT);
-    if (bounce == 0 && hit) {
-      primaryHitDistance = hitT;
-    }
     if (!hit) {
-      vec3 env = environmentRadiancePT(direction);
-
-      vec3 sunContrib = sunRadiance(direction);
-      if (uIntegrator_directLight > 0 && bounce > 0 && lastPdf > 0.0) {
-        float cosThetaMax = sunCosThetaMaxPT();
-        float sunOmega = 2.0 * PI * (1.0 - cosThetaMax);
-        float pdfLight = 1.0 / max(sunOmega, 1.0e-6);
-        float w = powerHeuristic(lastPdf, pdfLight);
-        env += sunContrib * w;
+      vec3 env;
+      if (uIntegrator_fogEnabled > 0 && bounce == 0) {
+        env = fogColorPT();
       } else {
-        env += sunContrib;
-      }
+        env = environmentRadiancePT(direction);
 
-      if (uIntegrator_directLight > 0 && uIntegrator_areaLightEnabled > 0 && bounce > 0 && lastPdf > 0.0) {
-        vec3 alDir, alRight, alUp;
-        cameraBasisPT(alDir, alRight, alUp);
-        vec3 alCenter = uEye + alRight * uIntegrator_areaLightOffsetX
-                             + alUp * uIntegrator_areaLightOffsetY
-                             + alDir * uIntegrator_areaLightOffsetZ;
-        float denom = dot(alDir, direction);
-        if (abs(denom) > 1.0e-6) {
-          float tLight = dot(alCenter - origin, alDir) / denom;
-          if (tLight > 0.0) {
-            vec3 hitLight = origin + direction * tLight;
-            vec3 alOffset = hitLight - alCenter;
-            float halfSize = max(uIntegrator_areaLightSize, 1.0e-4);
-            float u = dot(alOffset, alRight);
-            float v = dot(alOffset, alUp);
-            if (abs(u) <= halfSize && abs(v) <= halfSize) {
-              float area = (2.0 * halfSize) * (2.0 * halfSize);
-              float pdfArea = 1.0 / max(area, 1.0e-6);
-              float distSq = tLight * tLight;
-              float lightCos = abs(denom);
-              float pdfAreaSolid = pdfArea * distSq / max(lightCos, 1.0e-6);
-              float w = powerHeuristic(lastPdf, pdfAreaSolid);
-              env += areaLightRadiancePT() * w;
+        vec3 sunContrib = sunRadiance(direction);
+        if (uIntegrator_directLight > 0 && bounce > 0 && lastPdf > 0.0) {
+          float cosThetaMax = sunCosThetaMaxPT();
+          float sunOmega = 2.0 * PI * (1.0 - cosThetaMax);
+          float pdfLight = 1.0 / max(sunOmega, 1.0e-6);
+          float w = powerHeuristic(lastPdf, pdfLight);
+          env += sunContrib * w;
+        } else {
+          env += sunContrib;
+        }
+
+        if (uIntegrator_directLight > 0 && uIntegrator_areaLightEnabled > 0 && bounce > 0 && lastPdf > 0.0) {
+          vec3 alDir, alRight, alUp;
+          cameraBasisPT(alDir, alRight, alUp);
+          vec3 alCenter = uEye + alRight * uIntegrator_areaLightOffsetX
+                               + alUp * uIntegrator_areaLightOffsetY
+                               + alDir * uIntegrator_areaLightOffsetZ;
+          float denom = dot(alDir, direction);
+          if (abs(denom) > 1.0e-6) {
+            float tLight = dot(alCenter - origin, alDir) / denom;
+            if (tLight > 0.0) {
+              vec3 hitLight = origin + direction * tLight;
+              vec3 alOffset = hitLight - alCenter;
+              float halfSize = max(uIntegrator_areaLightSize, 1.0e-4);
+              float u = dot(alOffset, alRight);
+              float v = dot(alOffset, alUp);
+              if (abs(u) <= halfSize && abs(v) <= halfSize) {
+                float area = (2.0 * halfSize) * (2.0 * halfSize);
+                float pdfArea = 1.0 / max(area, 1.0e-6);
+                float distSq = tLight * tLight;
+                float lightCos = abs(denom);
+                float pdfAreaSolid = pdfArea * distSq / max(lightCos, 1.0e-6);
+                float w = powerHeuristic(lastPdf, pdfAreaSolid);
+                env += areaLightRadiancePT() * w;
+              }
             }
           }
         }
@@ -1275,14 +1288,6 @@ vec3 renderColor(vec3 ro, vec3 rd) {
     }
   }
 
-  if (primaryHitDistance > 0.0 && uIntegrator_fog > 0.0) {
-    float fogDensity = pow(max(uIntegrator_fog, 0.0), 4.0);
-    float fogFactor = 1.0 - exp(-fogDensity * primaryHitDistance * primaryHitDistance);
-    vec3 viewDir = normalize(rd);
-    vec3 background = environmentRadiancePT(viewDir) + sunRadiance(viewDir);
-    radiance = mix(radiance, background, clamp(fogFactor, 0.0, 1.0));
-  }
-
   if (uIntegrator_sampleClamp > 0.0) {
     return min(radiance, vec3(uIntegrator_sampleClamp));
   }
@@ -1297,7 +1302,10 @@ function integratorOptionGroupForKey(key: string): string {
   if (key === "aoStrength" || key === "aoSamples" || key === "shadowStrength" || key === "shadowSoftness") {
     return "Shadows/AO";
   }
-  if (key === "fog" || key === "backgroundStrength") {
+  if (key === "fogEnabled" || key === "fog" || key === "backgroundStrength") {
+    return "Environment";
+  }
+  if (key.startsWith("fogColor")) {
     return "Environment";
   }
   if (
@@ -1401,6 +1409,18 @@ function integratorSharedSemanticForKey(key: string): string | null {
   }
   if (key === "fog") {
     return "environment.fog";
+  }
+  if (key === "fogEnabled") {
+    return "environment.fogEnabled";
+  }
+  if (key === "fogColorR") {
+    return "environment.fogColor.r";
+  }
+  if (key === "fogColorG") {
+    return "environment.fogColor.g";
+  }
+  if (key === "fogColorB") {
+    return "environment.fogColor.b";
   }
   if (key === "aperture" || key === "focalDistance" || key === "aaJitter") {
     return `camera.${key}`;
@@ -1519,7 +1539,11 @@ export const INTEGRATORS: IntegratorDefinition[] = [
       { key: "sunDirectionZ", label: "Sun Direction Z", min: -1, max: 1, defaultValue: 0.6645, step: 0.01, control: "direction" },
       { key: "sunStrength", label: "Sun Strength", min: 0, max: 20, defaultValue: 6, step: 0.01 },
       { key: "skyStrength", label: "Sky Strength", min: 0, max: 5, defaultValue: 1, step: 0.01 },
-      { key: "fog", label: "Fog", min: 0, max: 2, defaultValue: 0, step: 0.01 },
+      { key: "fogEnabled", label: "Fog", min: 0, max: 1, defaultValue: 0, step: 1 },
+      { key: "fog", label: "Fog Density", min: 0, max: 2, defaultValue: 0, step: 0.01 },
+      { key: "fogColorR", label: "Fog Color R", min: 0, max: 1, defaultValue: 0.29, step: 0.01 },
+      { key: "fogColorG", label: "Fog Color G", min: 0, max: 1, defaultValue: 0.34, step: 0.01 },
+      { key: "fogColorB", label: "Fog Color B", min: 0, max: 1, defaultValue: 0.42, step: 0.01 },
       { key: "iblEnabled", label: "IBL Enabled", min: 0, max: 1, defaultValue: 1, step: 1 },
       { key: "iblStrength", label: "IBL Strength", min: 0, max: 20, defaultValue: 1, step: 0.01 },
       { key: "iblExposure", label: "IBL Exposure", min: -8, max: 8, defaultValue: 0, step: 0.01 },

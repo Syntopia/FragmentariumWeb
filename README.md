@@ -4,6 +4,35 @@ Web-based Fragmentarium-inspired fractal renderer using React, TypeScript, and W
 
 An environment for exploring path traced 3D fractals.
 
+## Features
+
+- Live fragment editing with syntax-highlighted code editor, line numbers, and optional wrap mode.
+- Real-time progressive rendering in WebGL2 with integrator modes: `Preview`, `Raytrace`, and `Pathtrace`.
+- Rich parameter controls (sliders, switches, color pickers, direction controls) generated from fragment uniforms.
+- Preset workflow for fragments, including applying and inserting presets into fragment source.
+- Timeline keyframing for animation workflows:
+  - Keyframe creation/edit/move/delete
+  - Interpolated preview playback in the main UI
+  - Timeline-aware export
+- Session management:
+  - Save/update local sessions in IndexedDB
+  - Session Gallery with thumbnails and folder hierarchy
+  - Import/export session gallery ZIP bundles
+  - Session PNG import/export with embedded session metadata
+- External GitHub session sources:
+  - Add GitHub tree or ZIP URLs
+  - Browse and open external sessions directly in Session Gallery
+- Export workflows:
+  - Still image export (PNG) with optional embedded preset/session metadata
+  - Animation export via WebCodecs movie or PNG frame ZIP
+  - Output size and quality presets
+- Legacy Fragmentarium support:
+  - Legacy import dialog
+  - Compatibility helpers for porting classic Fragmentarium fragments
+- Built-in diagnostics and tooling:
+  - Shader compile diagnostics with mapped clickable errors
+  - Help dialog with GPU/graphics capability information
+
 ## Live Demo
 
 https://syntopia.github.io/FragmentariumWeb/

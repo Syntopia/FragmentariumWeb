@@ -2,15 +2,24 @@ export interface SessionSnapshotRecord {
   path: string;
   previewImageBlob: Blob;
   previewImageMimeType: string;
+  previewFrames: SessionSnapshotPreviewFrameRecord[] | null;
   sessionJson: string;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+export interface SessionSnapshotPreviewFrameRecord {
+  imageBlob: Blob;
+  imageMimeType: string;
+  keyframeId: string;
+  t: number;
 }
 
 interface SessionSnapshotDbRecord {
   path: string;
   previewImageBlob: Blob;
   previewImageMimeType: string;
+  previewFrames?: SessionSnapshotPreviewFrameRecord[] | null;
   sessionJson: string;
   createdAtMs?: number;
   updatedAtMs: number;
@@ -128,6 +137,43 @@ function idbRequestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
+function sanitizePreviewFrames(
+  raw: SessionSnapshotDbRecord["previewFrames"]
+): SessionSnapshotPreviewFrameRecord[] | null {
+  if (raw === undefined || raw === null) {
+    return null;
+  }
+  if (!Array.isArray(raw)) {
+    return null;
+  }
+  const next: SessionSnapshotPreviewFrameRecord[] = [];
+  for (const frame of raw) {
+    if (typeof frame !== "object" || frame === null) {
+      continue;
+    }
+    const candidate = frame as SessionSnapshotPreviewFrameRecord;
+    if (!(candidate.imageBlob instanceof Blob)) {
+      continue;
+    }
+    if (typeof candidate.imageMimeType !== "string" || candidate.imageMimeType.trim().length === 0) {
+      continue;
+    }
+    if (typeof candidate.keyframeId !== "string" || candidate.keyframeId.trim().length === 0) {
+      continue;
+    }
+    if (!Number.isFinite(candidate.t)) {
+      continue;
+    }
+    next.push({
+      imageBlob: candidate.imageBlob,
+      imageMimeType: candidate.imageMimeType,
+      keyframeId: candidate.keyframeId,
+      t: candidate.t
+    });
+  }
+  return next.length > 0 ? next : null;
+}
+
 export async function listSessionSnapshotRecords(): Promise<SessionSnapshotRecord[]> {
   return await withStore("readonly", async (store) => {
     const all = await idbRequestToPromise(store.getAll() as IDBRequest<SessionSnapshotDbRecord[]>);
@@ -151,6 +197,7 @@ export async function listSessionSnapshotRecords(): Promise<SessionSnapshotRecor
         path: record.path,
         previewImageBlob: record.previewImageBlob,
         previewImageMimeType: record.previewImageMimeType,
+        previewFrames: sanitizePreviewFrames(record.previewFrames),
         sessionJson: record.sessionJson,
         createdAtMs: typeof record.createdAtMs === "number" && Number.isFinite(record.createdAtMs)
           ? record.createdAtMs
@@ -170,6 +217,25 @@ export async function putSessionSnapshotRecord(record: SessionSnapshotRecord): P
   if (record.previewImageMimeType.trim().length === 0) {
     throw new Error("Session snapshot preview image MIME type cannot be empty.");
   }
+  if (record.previewFrames !== null) {
+    if (!Array.isArray(record.previewFrames)) {
+      throw new Error("Session snapshot previewFrames must be an array or null.");
+    }
+    for (const frame of record.previewFrames) {
+      if (!(frame.imageBlob instanceof Blob)) {
+        throw new Error("Session snapshot preview frame image must be a Blob.");
+      }
+      if (frame.imageMimeType.trim().length === 0) {
+        throw new Error("Session snapshot preview frame MIME type cannot be empty.");
+      }
+      if (frame.keyframeId.trim().length === 0) {
+        throw new Error("Session snapshot preview frame keyframeId cannot be empty.");
+      }
+      if (!Number.isFinite(frame.t)) {
+        throw new Error("Session snapshot preview frame t must be finite.");
+      }
+    }
+  }
   if (record.sessionJson.trim().length === 0) {
     throw new Error("Session snapshot sessionJson cannot be empty.");
   }
@@ -185,6 +251,7 @@ export async function putSessionSnapshotRecord(record: SessionSnapshotRecord): P
       path: record.path,
       previewImageBlob: record.previewImageBlob,
       previewImageMimeType: record.previewImageMimeType,
+      previewFrames: record.previewFrames,
       sessionJson: record.sessionJson,
       createdAtMs: record.createdAtMs,
       updatedAtMs: record.updatedAtMs

@@ -51,4 +51,44 @@ describe("sessionGalleryZip v2", () => {
     const parsedEntries = parseZipStore(zipBytes);
     expect(parseSessionGalleryZipV2(parsedEntries)).toBeNull();
   });
+
+  test("round-trips optional preview frame sequences", () => {
+    const entries = buildSessionGalleryZipV2Entries(
+      [
+        {
+          path: "folder/animated",
+          sessionJson: JSON.stringify({ id: "animated" }),
+          previewImageBytes: new Uint8Array([1, 2, 3, 4]),
+          previewImageMimeType: "image/jpeg",
+          previewFrames: [
+            {
+              imageBytes: new Uint8Array([10, 11]),
+              imageMimeType: "image/jpeg",
+              keyframeId: "k0",
+              t: 0
+            },
+            {
+              imageBytes: new Uint8Array([12, 13]),
+              imageMimeType: "image/jpeg",
+              keyframeId: "k1",
+              t: 1
+            }
+          ],
+          createdAtMs: 1000,
+          updatedAtMs: 2000
+        }
+      ],
+      3000
+    );
+    const zipBytes = buildZipStore(entries);
+    const parsedEntries = parseZipStore(zipBytes);
+    const parsed = parseSessionGalleryZipV2(parsedEntries);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed).toHaveLength(1);
+    expect(parsed?.[0]?.previewFrames).not.toBeNull();
+    expect(parsed?.[0]?.previewFrames).toHaveLength(2);
+    expect(parsed?.[0]?.previewFrames?.[0]?.keyframeId).toBe("k0");
+    expect(parsed?.[0]?.previewFrames?.[1]?.t).toBe(1);
+  });
 });

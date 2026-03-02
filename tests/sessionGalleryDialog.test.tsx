@@ -80,4 +80,42 @@ describe("SessionGalleryDialog", () => {
       expect(onDeleteSessions).toHaveBeenCalledWith(["folder/a", "folder/b"]);
     });
   });
+
+  test("shows multi-preview indicator when a tile has keyframe preview images", () => {
+    render(
+      <SessionGalleryDialog
+        open={true}
+        items={[
+          {
+            id: "local:animated",
+            path: "Local Sessions/folder/animated",
+            tileLabel: "animated",
+            previewUrl: "https://example.com/a0.jpg",
+            previewUrls: ["https://example.com/a0.jpg", "https://example.com/a1.jpg", "https://example.com/a2.jpg"],
+            createdAtMs: 1,
+            updatedAtMs: 2,
+            sourceKind: "local",
+            localPath: "folder/animated"
+          }
+        ]}
+        externalSources={[]}
+        storageInfo={STORAGE_INFO}
+        isBusy={false}
+        persistentStorageRequestInProgress={false}
+        onClose={() => undefined}
+        onOpenSession={() => undefined}
+        onDeleteSession={() => undefined}
+        onDeleteSessions={() => undefined}
+        onRenameSession={() => undefined}
+        onRequestPersistentStorage={() => undefined}
+        onExportAll={() => undefined}
+        onImportZip={() => undefined}
+        onAddExternalGitHubSource={() => Promise.resolve()}
+        onRefreshExternalSource={() => Promise.resolve()}
+        onRemoveExternalSource={() => undefined}
+      />
+    );
+
+    expect(screen.getByText("1/3")).toBeInTheDocument();
+  });
 });

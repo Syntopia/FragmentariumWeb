@@ -18,7 +18,15 @@ export const INTEGRATOR_OPTION_HELP_TEXT: Readonly<Record<string, string>> = {
   shadowSoftness:
     "Penumbra softness factor for distance-estimated shadows. Higher values give wider, softer shadow transitions.",
   fog:
-    "Distance fog density. Higher values blend geometry into background more quickly with distance.",
+    "Distance fog density. Higher values blend geometry into fog color more quickly with distance.",
+  fogEnabled:
+    "Enables fog shading. When enabled, rays that miss geometry use Fog Color as background.",
+  fogColorR:
+    "Red channel of fog/background color.",
+  fogColorG:
+    "Green channel of fog/background color.",
+  fogColorB:
+    "Blue channel of fog/background color.",
   backgroundStrength:
     "Background/environment brightness multiplier when rays miss geometry.",
   sunDirectionX:
@@ -187,6 +195,7 @@ const INTEGRATOR_COLOR_TRIPLET_HELP_TEXT: Readonly<Record<string, string>> = {
   iblTopColor: "Environment top hemisphere tint color.",
   iblHorizonColor: "Environment horizon band tint color.",
   iblGroundColor: "Environment ground/lower hemisphere tint color.",
+  fogColor: "Tint color used by distance fog blending.",
   areaLightColor: "Emitted color of the rectangular area light."
 };
 

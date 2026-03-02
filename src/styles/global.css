@@ -2279,6 +2279,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 4px;
+  position: relative;
 }
 
 .session-gallery-folder-button {
@@ -2294,6 +2295,33 @@ h3 {
   padding: 4px 8px;
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.session-gallery-folder-tooltip {
+  position: absolute;
+  left: 8px;
+  bottom: calc(100% + 6px);
+  max-width: min(460px, calc(100vw - 24px));
+  border: 1px solid #3f557a;
+  background: #141e2e;
+  color: #dcecff;
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.36);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 2400;
+  transition: opacity 120ms ease, visibility 120ms ease;
+}
+
+.session-gallery-folder-button:hover .session-gallery-folder-tooltip,
+.session-gallery-folder-button:focus-visible .session-gallery-folder-tooltip {
+  opacity: 1;
+  visibility: visible;
 }
 
 .session-gallery-folder-button.is-active {
@@ -2489,21 +2517,39 @@ h3 {
 }
 
 .session-gallery-tile-preview {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
   background: #000;
   overflow: hidden;
 }
 
-.session-gallery-tile img {
+.session-gallery-tile-preview-image {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: transparent;
+}
+
+.session-gallery-tile-preview-image.is-active.is-fading {
+  animation: session-gallery-preview-crossfade 340ms ease;
+}
+
+.session-gallery-tile-preview-indicator {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  border: 1px solid rgba(82, 111, 154, 0.75);
+  background: rgba(8, 13, 21, 0.82);
+  color: #d6e2f7;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: 600;
 }
 
 .session-gallery-tile-label {
@@ -2559,6 +2605,15 @@ h3 {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes session-gallery-preview-crossfade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
@@ -2954,6 +3009,16 @@ h3 {
   background: #161b24;
   border-radius: 6px;
   padding: 6px 8px;
+}
+
+.export-inline-option-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  margin-top: 2px;
+  padding-top: 8px;
 }
 
 .export-timeline-info.is-warning {
@@ -3838,10 +3903,32 @@ h3 {
   gap: 4px;
 }
 
+.error-strip-summary {
+  color: #ffbcbc;
+  font-size: 11px;
+}
+
+.error-strip-raw-log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.error-strip-raw-toggle {
+  align-self: flex-start;
+}
+
 .error-diagnostic-button {
   text-align: left;
   white-space: normal;
   line-height: 1.25;
+}
+
+.error-strip-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
 }
 
 .error-strip button {

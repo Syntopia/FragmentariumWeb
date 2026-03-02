@@ -36,7 +36,15 @@ export interface GitHubGalleryZipSessionEntry {
   sessionJson: string;
   previewImageBytes: Uint8Array;
   previewImageMimeType: string;
+  previewFrames: GitHubGalleryZipPreviewFrameEntry[] | null;
   updatedAtMs: number;
+}
+
+export interface GitHubGalleryZipPreviewFrameEntry {
+  imageBytes: Uint8Array;
+  imageMimeType: string;
+  keyframeId: string;
+  t: number;
 }
 
 interface GitHubContentsDirEntry {
@@ -55,6 +63,13 @@ interface GitHubFetchLikeResponse {
 }
 
 export type GitHubFetchLike = (input: string, init?: RequestInit) => Promise<GitHubFetchLikeResponse>;
+
+interface ParsedRawGitHubZipUrl {
+  owner: string;
+  repo: string;
+  branch: string;
+  path: string;
+}
 
 const GITHUB_HOSTS = new Set([
   "github.com",
@@ -136,17 +151,95 @@ async function fetchArrayBufferOrThrow(fetchImpl: GitHubFetchLike, url: string):
   return await response.arrayBuffer();
 }
 
-function parseZipSource(inputUrl: string, parsedUrl: URL): GitHubGalleryZipSource {
-  const rawLabel = decodeURIComponent(parsedUrl.pathname.split("/").filter((segment) => segment.length > 0).at(-1) ?? "gallery.zip");
-  const sourceLabel = `zip:${parsedUrl.hostname}/${rawLabel}`;
-  const sourceTreePath = `GitHub/${sourceLabel}`;
+function parseZipSource(parsedUrl: URL): GitHubGalleryZipSource {
+  const normalizedZipUrl = normalizeGitHubZipUrl(parsedUrl);
+  const normalizedParsedUrl = new URL(normalizedZipUrl);
+  const rawLabel = decodeURIComponent(
+    normalizedParsedUrl.pathname.split("/").filter((segment) => segment.length > 0).at(-1) ?? "gallery.zip"
+  );
+  const parsedRawZipUrl = parseRawGitHubZipUrl(normalizedParsedUrl);
+  const sourceLabel =
+    parsedRawZipUrl === null ? `zip:${normalizedParsedUrl.hostname}/${rawLabel}` : `${parsedRawZipUrl.repo}/${rawLabel}`;
+  const sourceTreePath =
+    parsedRawZipUrl === null
+      ? `GitHub/${sourceLabel}`
+      : buildGitHubSourceTreePath({
+          owner: parsedRawZipUrl.owner,
+          repo: parsedRawZipUrl.repo,
+          branch: parsedRawZipUrl.branch,
+          sourceScope: parsedRawZipUrl.path
+        });
   return {
     kind: "zip",
-    id: `github-zip:${parsedUrl.toString()}`,
-    url: inputUrl,
+    id: `github-zip:${normalizedZipUrl}`,
+    url: normalizedZipUrl,
     sourceTreePath,
     sourceLabel
   };
+}
+
+function normalizeGitHubZipUrl(parsedUrl: URL): string {
+  const host = parsedUrl.hostname.toLowerCase();
+  if (host === "raw.githubusercontent.com" || host === "objects.githubusercontent.com") {
+    return parsedUrl.toString();
+  }
+  if (host !== "github.com" && host !== "www.github.com") {
+    return parsedUrl.toString();
+  }
+
+  const decodedSegments = parsedUrl.pathname
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => decodeURIComponent(segment));
+  if (decodedSegments.length < 5) {
+    return parsedUrl.toString();
+  }
+
+  const [owner, repo, blobLiteral, branch, ...pathSegments] = decodedSegments;
+  if (blobLiteral !== "blob") {
+    return parsedUrl.toString();
+  }
+  if (owner.length === 0 || repo.length === 0 || branch.length === 0 || pathSegments.length === 0) {
+    return parsedUrl.toString();
+  }
+
+  const encodedPath = pathSegments.map((segment) => encodeURIComponent(segment)).join("/");
+  return `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodeURIComponent(branch)}/${encodedPath}`;
+}
+
+function parseRawGitHubZipUrl(parsedUrl: URL): ParsedRawGitHubZipUrl | null {
+  if (parsedUrl.hostname.toLowerCase() !== "raw.githubusercontent.com") {
+    return null;
+  }
+  const segments = parsedUrl.pathname
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => decodeURIComponent(segment));
+  if (segments.length < 4) {
+    return null;
+  }
+  const [owner, repo, branch, ...pathSegments] = segments;
+  const path = pathSegments.join("/");
+  if (owner.length === 0 || repo.length === 0 || branch.length === 0 || path.length === 0) {
+    return null;
+  }
+  return { owner, repo, branch, path };
+}
+
+function buildGitHubSourceTreePath({
+  owner,
+  repo,
+  branch,
+  sourceScope
+}: {
+  owner: string;
+  repo: string;
+  branch: string;
+  sourceScope: string;
+}): string {
+  const branchSuffix = branch === "main" ? "" : `@${branch}`;
+  const scopeToken = encodeURIComponent(sourceScope);
+  return `GitHub/${owner}/${repo}${branchSuffix}::${scopeToken}`;
 }
 
 export function parseGitHubGalleryTreeUrl(inputUrl: string): GitHubGallerySource {
@@ -165,7 +258,7 @@ export function parseGitHubGalleryTreeUrl(inputUrl: string): GitHubGallerySource
   }
 
   if (parsedUrl.pathname.toLowerCase().endsWith(".zip")) {
-    return parseZipSource(inputUrl, parsedUrl);
+    return parseZipSource(parsedUrl);
   }
 
   const rawSegments = parsedUrl.pathname.split("/").filter((segment) => segment.length > 0);
@@ -183,7 +276,14 @@ export function parseGitHubGalleryTreeUrl(inputUrl: string): GitHubGallerySource
   }
 
   const normalizedPath = pathSegments.join("/").replace(/\/+/g, "/");
-  const sourceTreePath = `GitHub/${owner}/${repo}/${branch}${normalizedPath.length > 0 ? `/${normalizedPath}` : ""}`;
+  const sourceScope = normalizedPath.length > 0 ? normalizedPath : "(root)";
+  const sourceTreePath = buildGitHubSourceTreePath({
+    owner,
+    repo,
+    branch,
+    sourceScope
+  });
+  const sourceLabel = normalizedPath.length > 0 ? `${repo}/${normalizedPath}` : `${repo}/(root)`;
 
   return {
     kind: "tree",
@@ -195,7 +295,7 @@ export function parseGitHubGalleryTreeUrl(inputUrl: string): GitHubGallerySource
     path: normalizedPath,
     sourcePathSegments: pathSegments,
     sourceTreePath,
-    sourceLabel: `${owner}/${repo}@${branch}${normalizedPath.length > 0 ? `:${normalizedPath}` : ""}`
+    sourceLabel
   };
 }
 
@@ -254,6 +354,15 @@ export async function listGitHubGalleryZipSessionEntries(
       sessionJson: entry.sessionJson,
       previewImageBytes: entry.previewImageBytes,
       previewImageMimeType: entry.previewImageMimeType,
+      previewFrames:
+        entry.previewFrames === null
+          ? null
+          : entry.previewFrames.map((frame) => ({
+              imageBytes: frame.imageBytes,
+              imageMimeType: frame.imageMimeType,
+              keyframeId: frame.keyframeId,
+              t: frame.t
+            })),
       updatedAtMs: entry.updatedAtMs
     }))
     .sort((a, b) => a.relativePath.localeCompare(b.relativePath));

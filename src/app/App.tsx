@@ -75,7 +75,8 @@ import {
   deleteSessionSnapshotRecord,
   listSessionSnapshotRecords,
   putSessionSnapshotRecord,
-  type SessionSnapshotRecord
+  type SessionSnapshotRecord,
+  type SessionSnapshotPreviewFrameRecord
 } from "../utils/sessionSnapshotStore";
 import {
   WebCodecsWebmEncoder,
@@ -103,9 +104,15 @@ import {
   resolveTimelineKeyframeSnapshot,
   updateTimelineActiveKeyPatch,
   updateTimelineAllKeyPatches,
+  type SessionTimelineSnapshot,
   type SessionTimelineState
 } from "./timeline";
 import { buildTimelineGraphLines } from "./timelineGraph";
+import {
+  buildAnimationRenderManifestV2,
+  buildNativeRenderTask,
+  type NativeRenderTask
+} from "./nativeRenderManifest";
 import {
   buildIntegratorOptionRenderItems,
   colorTripletPatchFromHex,
@@ -255,9 +262,17 @@ interface PendingSessionPngImportState {
 interface LocalSessionSnapshotState {
   previewImageBlob: Blob;
   previewImageMimeType: string;
+  previewFrames: LocalSessionPreviewFrameState[] | null;
   sessionJson: string;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+interface LocalSessionPreviewFrameState {
+  imageBlob: Blob;
+  imageMimeType: string;
+  keyframeId: string;
+  t: number;
 }
 
 interface ExternalFragmentOriginInfo {
@@ -273,6 +288,7 @@ interface SessionImportContext {
 interface ExternalGallerySourceItem {
   relativePath: string;
   previewUrl: string;
+  previewUrls: string[] | null;
   remotePngUrl: string | null;
   remoteSessionJson: string | null;
   updatedAtMs: number;
@@ -346,6 +362,7 @@ interface DecodedLocalSessionSnapshot {
   sessionJson: string;
   snapshotPreviewImageBlob: Blob;
   snapshotPreviewImageMimeType: string;
+  snapshotPreviewFrames: LocalSessionPreviewFrameState[] | null;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -541,6 +558,13 @@ function revokeDisposableExternalSourceItems(items: ExternalGallerySourceItem[])
   for (const item of items) {
     if (item.revokePreviewUrlOnDispose) {
       URL.revokeObjectURL(item.previewUrl);
+      if (item.previewUrls !== null) {
+        for (const previewUrl of item.previewUrls) {
+          if (previewUrl !== item.previewUrl) {
+            URL.revokeObjectURL(previewUrl);
+          }
+        }
+      }
     }
   }
 }
@@ -1138,7 +1162,7 @@ export function App(): JSX.Element {
   const [localSystemsByPath, setLocalSystemsByPath] = useState(initial.localSystemsByPath);
   const [localSessionPayloadsByPath, setLocalSessionPayloadsByPath] = useState(initial.localSessionPayloadsByPath);
   const [localSessionSnapshotsByPath, setLocalSessionSnapshotsByPath] = useState<Record<string, LocalSessionSnapshotState>>({});
-  const [localSessionPreviewUrlsByPath, setLocalSessionPreviewUrlsByPath] = useState<Record<string, string>>({});
+  const [localSessionPreviewUrlsByPath, setLocalSessionPreviewUrlsByPath] = useState<Record<string, string[]>>({});
   const [editorSourceBySystem, setEditorSourceBySystem] = useState(initial.editorSourceBySystem);
   const [uniformValuesBySystem, setUniformValuesBySystem] = useState(initial.uniformValuesBySystem);
   const [cameraBySystem, setCameraBySystem] = useState(initial.cameraBySystem);
@@ -1224,6 +1248,7 @@ export function App(): JSX.Element {
     document.title = APP_TITLE;
   }, []);
   const [compileError, setCompileError] = useState<string | null>(initial.persistenceError);
+  const [showRawShaderLog, setShowRawShaderLog] = useState(false);
   const [editorJumpRequest, setEditorJumpRequest] = useState<EditorJumpRequest | null>(null);
   const nextEditorJumpTokenRef = useRef(1);
 
@@ -1276,6 +1301,47 @@ export function App(): JSX.Element {
   const sourceDraft = editorSourceBySystem[selectedSystemKey] ?? baselineSource;
   const parseResult = parsedBySystem[selectedSystemKey] ?? null;
   const mappedShaderDiagnostics = shaderErrorDetails?.diagnostics.filter((entry) => entry.mappedSource !== null) ?? [];
+  const mappedShaderDiagnosticsDeduped = useMemo(
+    () => {
+      const seen = new Set<string>();
+      const deduped: Array<{ originalIndex: number; path: string; line: number; message: string; rawLine: string }> = [];
+      for (let index = 0; index < mappedShaderDiagnostics.length; index += 1) {
+        const entry = mappedShaderDiagnostics[index];
+        const mappedSource = entry.mappedSource;
+        if (mappedSource === null) {
+          continue;
+        }
+        const key = `${mappedSource.path}:${mappedSource.line}:${entry.message}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        deduped.push({
+          originalIndex: index,
+          path: mappedSource.path,
+          line: mappedSource.line,
+          message: entry.message,
+          rawLine: entry.rawLine
+        });
+      }
+      return deduped;
+    },
+    [mappedShaderDiagnostics]
+  );
+  const shaderErrorSummaryLabel = useMemo(() => {
+    if (mappedShaderDiagnosticsDeduped.length > 0) {
+      const count = mappedShaderDiagnosticsDeduped.length;
+      return `${count} mapped error${count === 1 ? "" : "s"} in ${selectedSystemSourcePath}`;
+    }
+    if (shaderError !== null) {
+      return "Shader compilation failed.";
+    }
+    return null;
+  }, [mappedShaderDiagnosticsDeduped, selectedSystemSourcePath, shaderError]);
+
+  useEffect(() => {
+    setShowRawShaderLog(false);
+  }, [shaderError]);
 
   const activeIntegrator = getIntegratorById(activeIntegratorId);
   const activeIntegratorOptions =
@@ -1396,10 +1462,18 @@ export function App(): JSX.Element {
   const localSessionSnapshotStorageBytes = useMemo(
     () =>
       Object.values(localSessionSnapshotsByPath).reduce(
-        (sum, snapshot) =>
-          sum +
-          Math.max(0, Math.trunc(snapshot.previewImageBlob.size)) +
-          new TextEncoder().encode(snapshot.sessionJson).length,
+        (sum, snapshot) => {
+          const previewFramesBytes =
+            snapshot.previewFrames === null
+              ? 0
+              : snapshot.previewFrames.reduce((frameSum, frame) => frameSum + Math.max(0, Math.trunc(frame.imageBlob.size)), 0);
+          return (
+            sum +
+            Math.max(0, Math.trunc(snapshot.previewImageBlob.size)) +
+            previewFramesBytes +
+            new TextEncoder().encode(snapshot.sessionJson).length
+          );
+        },
         0
       ),
     [localSessionSnapshotsByPath]
@@ -1408,15 +1482,16 @@ export function App(): JSX.Element {
     () =>
       Object.entries(localSessionSnapshotsByPath)
         .map<SessionGalleryItem | null>(([path, snapshot]) => {
-          const previewUrl = localSessionPreviewUrlsByPath[path];
-          if (previewUrl === undefined) {
+          const previewUrls = localSessionPreviewUrlsByPath[path];
+          if (previewUrls === undefined || previewUrls.length === 0) {
             return null;
           }
           return {
             id: `local:${path}`,
             path: `${LOCAL_SESSION_GALLERY_ROOT_LABEL}/${path}`,
             tileLabel: path,
-            previewUrl,
+            previewUrl: previewUrls[0] as string,
+            previewUrls,
             createdAtMs: snapshot.createdAtMs,
             updatedAtMs: snapshot.updatedAtMs,
             sourceKind: "local",
@@ -1437,6 +1512,7 @@ export function App(): JSX.Element {
             path: `${sourceTreePath}/${item.relativePath}`,
             tileLabel: item.relativePath,
             previewUrl: item.previewUrl,
+            previewUrls: item.previewUrls,
             createdAtMs: null,
             updatedAtMs: item.updatedAtMs,
             sourceKind: "github" as const,
@@ -1448,6 +1524,15 @@ export function App(): JSX.Element {
         )
         .sort((a, b) => a.path.localeCompare(b.path)),
     [githubGallerySources]
+  );
+  const localPrimaryPreviewUrlByPath = useMemo<Record<string, string>>(
+    () =>
+      Object.fromEntries(
+        Object.entries(localSessionPreviewUrlsByPath)
+          .filter(([, urls]) => urls.length > 0)
+          .map(([path, urls]) => [path, urls[0] as string])
+      ),
+    [localSessionPreviewUrlsByPath]
   );
   const sessionGalleryItems = useMemo<SessionGalleryItem[]>(
     () => [...localSessionGalleryItems, ...externalSessionGalleryItems].sort((a, b) => a.path.localeCompare(b.path)),
@@ -1742,11 +1827,22 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const urls: string[] = [];
-    const nextUrls: Record<string, string> = {};
+    const nextUrls: Record<string, string[]> = {};
     for (const [path, snapshot] of Object.entries(localSessionSnapshotsByPath)) {
-      const url = URL.createObjectURL(snapshot.previewImageBlob);
-      urls.push(url);
-      nextUrls[path] = url;
+      const keyframePreviewUrls: string[] = [];
+      if (snapshot.previewFrames !== null && snapshot.previewFrames.length > 0) {
+        for (const frame of snapshot.previewFrames) {
+          const frameUrl = URL.createObjectURL(frame.imageBlob);
+          urls.push(frameUrl);
+          keyframePreviewUrls.push(frameUrl);
+        }
+      }
+      if (keyframePreviewUrls.length === 0) {
+        const url = URL.createObjectURL(snapshot.previewImageBlob);
+        urls.push(url);
+        keyframePreviewUrls.push(url);
+      }
+      nextUrls[path] = keyframePreviewUrls;
     }
     setLocalSessionPreviewUrlsByPath(nextUrls);
     return () => {
@@ -1948,19 +2044,31 @@ export function App(): JSX.Element {
             ? (await listGitHubGalleryPngEntries(sourceToRefresh)).map((item) => ({
                 relativePath: item.relativePath,
                 previewUrl: item.downloadUrl,
+                previewUrls: null,
                 remotePngUrl: item.downloadUrl,
                 remoteSessionJson: null,
                 updatedAtMs: 0,
                 revokePreviewUrlOnDispose: false
               }))
-            : (await listGitHubGalleryZipSessionEntries(sourceToRefresh)).map((item) => ({
-                relativePath: item.relativePath,
-                previewUrl: URL.createObjectURL(uint8ArrayToBlob(item.previewImageBytes, item.previewImageMimeType)),
-                remotePngUrl: null,
-                remoteSessionJson: item.sessionJson,
-                updatedAtMs: item.updatedAtMs,
-                revokePreviewUrlOnDispose: true
-              }));
+            : (await listGitHubGalleryZipSessionEntries(sourceToRefresh)).map((item) => {
+                const keyframePreviewUrls =
+                  item.previewFrames === null
+                    ? null
+                    : item.previewFrames.map((frame) => URL.createObjectURL(uint8ArrayToBlob(frame.imageBytes, frame.imageMimeType)));
+                const previewUrl =
+                  keyframePreviewUrls !== null && keyframePreviewUrls.length > 0
+                    ? keyframePreviewUrls[0]
+                    : URL.createObjectURL(uint8ArrayToBlob(item.previewImageBytes, item.previewImageMimeType));
+                return {
+                  relativePath: item.relativePath,
+                  previewUrl,
+                  previewUrls: keyframePreviewUrls,
+                  remotePngUrl: null,
+                  remoteSessionJson: item.sessionJson,
+                  updatedAtMs: item.updatedAtMs,
+                  revokePreviewUrlOnDispose: true
+                };
+              });
         setGitHubGallerySourcesTracked((prev) =>
           prev.map((entry) =>
             entry.source.id === sourceId
@@ -2088,6 +2196,7 @@ export function App(): JSX.Element {
       nextLocalSnapshotsByPath[snapshot.path] = {
         previewImageBlob: snapshot.snapshotPreviewImageBlob,
         previewImageMimeType: snapshot.snapshotPreviewImageMimeType,
+        previewFrames: snapshot.snapshotPreviewFrames,
         sessionJson: snapshot.sessionJson,
         createdAtMs: snapshot.createdAtMs,
         updatedAtMs: snapshot.updatedAtMs
@@ -2172,6 +2281,7 @@ export function App(): JSX.Element {
         next[snapshot.path] = {
           previewImageBlob: snapshot.snapshotPreviewImageBlob,
           previewImageMimeType: snapshot.snapshotPreviewImageMimeType,
+          previewFrames: snapshot.snapshotPreviewFrames,
           sessionJson: snapshot.sessionJson,
           createdAtMs: snapshot.createdAtMs,
           updatedAtMs: snapshot.updatedAtMs
@@ -2230,6 +2340,7 @@ export function App(): JSX.Element {
               sessionJson: record.sessionJson,
               snapshotPreviewImageBlob: record.previewImageBlob,
               snapshotPreviewImageMimeType: record.previewImageMimeType,
+              snapshotPreviewFrames: record.previewFrames,
               createdAtMs: record.createdAtMs,
               updatedAtMs: record.updatedAtMs
             });
@@ -3458,6 +3569,139 @@ export function App(): JSX.Element {
     }
   };
 
+  const onStartManifestExportRender = async (): Promise<void> => {
+    if (exportDialogState === null) {
+      return;
+    }
+    if (parseResult === null) {
+      updateExportDialogState({ statusMessage: "Cannot export render manifest: fragment is not compiled." });
+      return;
+    }
+
+    const dialogSnapshot = { ...exportDialogState };
+    const timelineForExport = selectedTimeline === null ? null : cloneTimelineState(selectedTimeline);
+    if (dialogSnapshot.mode !== "animation" || timelineForExport === null || timelineForExport.keyframes.length < 2) {
+      updateExportDialogState({
+        statusMessage: "Render manifest export requires Timeline mode with at least two keyframes."
+      });
+      return;
+    }
+
+    const abortController = new AbortController();
+    exportAbortControllerRef.current = abortController;
+    const totalFrames = computeAnimationFrameCount(dialogSnapshot.animationDurationSeconds, dialogSnapshot.movieFps);
+    setExportProgressState({
+      overallProgress: 0,
+      currentFrameIndex: 0,
+      totalFrames,
+      etaLabel: "Estimating…",
+      stageLabel: "Preparing render manifest..."
+    });
+    updateExportDialogState({ statusMessage: "Preparing Animation Render JSON manifest..." });
+    await yieldToUiFrames();
+
+    const exportStartedMs = performance.now();
+    const updateProgress = (overallProgress: number, currentFrameIndex: number, stageLabel: string): void => {
+      const clampedProgress = Math.max(0, Math.min(1, overallProgress));
+      const elapsedSec = Math.max((performance.now() - exportStartedMs) / 1000, 1e-3);
+      const etaSec = clampedProgress > 1.0e-4 ? (elapsedSec * (1 - clampedProgress)) / clampedProgress : null;
+      setExportProgressState({
+        overallProgress: clampedProgress,
+        currentFrameIndex,
+        totalFrames,
+        etaLabel: formatEtaSeconds(etaSec),
+        stageLabel
+      });
+    };
+
+    try {
+      const tasks: NativeRenderTask[] = [];
+      const systemDefinition = {
+        source: sourceDraft,
+        treePath: selectedSystemTreePath,
+        sourcePath: selectedSystemSourcePath,
+        selectedSystemKey
+      } as const;
+
+      for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
+        if (abortController.signal.aborted) {
+          throw createExportAbortErrorLocal();
+        }
+
+        const timelineT = totalFrames <= 1 ? 0 : frameIndex / Math.max(totalFrames - 1, 1);
+        const seconds = timelineT * Math.max(0.1, dialogSnapshot.animationDurationSeconds);
+        const interpolated = interpolateTimelineSnapshotAt(timelineForExport, timelineT, parseResult.uniforms);
+        const task = buildNativeRenderTask({
+          frameIndex,
+          frameCount: totalFrames,
+          timelineT,
+          seconds,
+          width: dialogSnapshot.width,
+          height: dialogSnapshot.height,
+          subframes: dialogSnapshot.subframes,
+          geometrySource: parseResult.shaderSource,
+          geometryLineMap: parseResult.shaderLineMap,
+          uniformDefinitions: parseResult.uniforms,
+          snapshot: interpolated,
+          systemDefinition
+        });
+        tasks.push(task);
+        updateProgress(
+          Math.max(0.01, (frameIndex + 1) / totalFrames * 0.95),
+          frameIndex,
+          `Composing frame ${frameIndex + 1}/${totalFrames} manifest data`
+        );
+        await yieldToUiFrames();
+      }
+
+      updateProgress(0.98, totalFrames - 1, "Serializing manifest...");
+      await yieldToUiFrames();
+
+      const manifest = buildAnimationRenderManifestV2({
+        appVersion: APP_VERSION_LABEL,
+        createdAtMs: Date.now(),
+        source: {
+          treePath: selectedSystemTreePath,
+          sourcePath: selectedSystemSourcePath,
+          selectedSystemKey
+        },
+        width: dialogSnapshot.width,
+        height: dialogSnapshot.height,
+        frameCount: totalFrames,
+        fps: Math.max(1, dialogSnapshot.movieFps),
+        durationSeconds: Math.max(0.1, dialogSnapshot.animationDurationSeconds),
+        subframes: Math.max(1, dialogSnapshot.subframes),
+        interpolation: timelineForExport.interpolation,
+        tasks
+      });
+
+      const manifestJson = JSON.stringify(manifest, null, 2);
+      const manifestBlob = new Blob([manifestJson], { type: "application/json" });
+      const systemStem = sanitizeFileStem(selectedSystemTreePath);
+      const fileName = `${systemStem}_${dialogSnapshot.width}x${dialogSnapshot.height}_${totalFrames}f_render_manifest.json`;
+      downloadBlob(manifestBlob, fileName);
+
+      updateProgress(1, totalFrames - 1, "Render manifest exported.");
+      updateExportDialogState({ statusMessage: "Animation Render JSON manifest exported." });
+      pushToast(`Animation Render JSON manifest exported (${totalFrames} frames).`);
+      console.info(`[app] Exported animation render manifest '${fileName}' (${totalFrames} frames).`);
+      await yieldToUiFrames(2);
+    } catch (error) {
+      if (isAbortError(error) || isLocalExportAbortError(error)) {
+        updateExportDialogState({ statusMessage: "Render manifest export cancelled." });
+        pushToast("Render manifest export cancelled.");
+      } else {
+        const message = error instanceof Error ? error.message : String(error);
+        updateExportDialogState({ statusMessage: `Render manifest export failed: ${message}` });
+        pushToast(`Render manifest export failed: ${message}`, "error");
+        console.error(`[app] Render manifest export failed for '${selectedSystemKey}': ${message}`);
+      }
+    } finally {
+      exportAbortControllerRef.current = null;
+      setExportProgressState(null);
+    }
+  };
+
   const updateExportDialogState = (patch: Partial<ExportDialogState>): void => {
     setExportDialogState((prev) => {
       if (prev === null) {
@@ -4392,6 +4636,12 @@ export function App(): JSX.Element {
         sessionJson: string;
         previewImageBytes: Uint8Array;
         previewImageMimeType: string;
+        previewFrames: {
+          imageBytes: Uint8Array;
+          imageMimeType: string;
+          keyframeId: string;
+          t: number;
+        }[] | null;
         createdAtMs: number;
         updatedAtMs: number;
       }> = [];
@@ -4412,6 +4662,17 @@ export function App(): JSX.Element {
           sessionJson: snapshot.sessionJson,
           previewImageBytes: await blobToUint8Array(snapshot.previewImageBlob),
           previewImageMimeType: snapshot.previewImageMimeType,
+          previewFrames:
+            snapshot.previewFrames === null
+              ? null
+              : await Promise.all(
+                  snapshot.previewFrames.map(async (frame) => ({
+                    imageBytes: await blobToUint8Array(frame.imageBlob),
+                    imageMimeType: frame.imageMimeType,
+                    keyframeId: frame.keyframeId,
+                    t: frame.t
+                  }))
+                ),
           createdAtMs: snapshot.createdAtMs,
           updatedAtMs: snapshot.updatedAtMs
         });
@@ -4507,6 +4768,15 @@ export function App(): JSX.Element {
           const payload = parseSettingsClipboardPayload(session.sessionJson);
           const source = requireEmbeddedFragmentSource(payload, `ZIP session '${session.path}'`);
           const previewImageBlob = uint8ArrayToBlob(session.previewImageBytes, session.previewImageMimeType);
+          const previewFrames =
+            session.previewFrames === null
+              ? null
+              : session.previewFrames.map((frame) => ({
+                  imageBlob: uint8ArrayToBlob(frame.imageBytes, frame.imageMimeType),
+                  imageMimeType: frame.imageMimeType,
+                  keyframeId: frame.keyframeId,
+                  t: frame.t
+                }));
 
           decodedSnapshots.push({
             path: localPath,
@@ -4515,6 +4785,7 @@ export function App(): JSX.Element {
             sessionJson: session.sessionJson,
             snapshotPreviewImageBlob: previewImageBlob,
             snapshotPreviewImageMimeType: session.previewImageMimeType,
+            snapshotPreviewFrames: previewFrames,
             createdAtMs: session.createdAtMs,
             updatedAtMs: session.updatedAtMs
           });
@@ -4522,6 +4793,7 @@ export function App(): JSX.Element {
             path: localPath,
             previewImageBlob,
             previewImageMimeType: session.previewImageMimeType,
+            previewFrames,
             sessionJson: session.sessionJson,
             createdAtMs: session.createdAtMs,
             updatedAtMs: session.updatedAtMs
@@ -4562,6 +4834,7 @@ export function App(): JSX.Element {
             sessionJson: parsedPng.sessionJson,
             snapshotPreviewImageBlob: previewImageBlob,
             snapshotPreviewImageMimeType: "image/png",
+            snapshotPreviewFrames: null,
             createdAtMs,
             updatedAtMs
           });
@@ -4569,6 +4842,7 @@ export function App(): JSX.Element {
             path: localPath,
             previewImageBlob,
             previewImageMimeType: "image/png",
+            previewFrames: null,
             sessionJson: parsedPng.sessionJson,
             createdAtMs,
             updatedAtMs
@@ -4709,9 +4983,9 @@ export function App(): JSX.Element {
         "",
         compileError !== null ? `Compile error:\n${compileError}` : null,
         shaderError !== null ? `Shader error:\n${shaderError}` : null,
-        shaderErrorDetails !== null && mappedShaderDiagnostics.length > 0
-          ? `Mapped diagnostics:\n${mappedShaderDiagnostics
-              .map((entry) => `${entry.mappedSource!.path}:${entry.mappedSource!.line}: ${entry.message}`)
+        shaderErrorDetails !== null && mappedShaderDiagnosticsDeduped.length > 0
+          ? `Mapped diagnostics:\n${mappedShaderDiagnosticsDeduped
+              .map((entry) => `${entry.path}:${entry.line}: ${entry.message}`)
               .join("\n")}`
           : null
       ].filter((entry): entry is string => entry !== null);
@@ -4849,6 +5123,7 @@ export function App(): JSX.Element {
     if (parseResult === null) {
       throw new Error("Compile the current fragment before saving a local session snapshot.");
     }
+    const parsed = parseResult;
 
     const targetEntryKey = makeLocalEntryKey(normalizedPath);
     const payload = buildSettingsClipboardPayload({
@@ -4883,9 +5158,31 @@ export function App(): JSX.Element {
       `[app] Saving session snapshot '${normalizedPath}' at ${width}x${height} (${LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES} subframes).`
     );
 
+    const keyframePreviewTargets: Array<{ keyframeId: string; t: number; snapshot: SessionTimelineSnapshot }> =
+      selectedTimeline !== null && selectedTimeline.keyframes.length > 1
+        ? [...selectedTimeline.keyframes]
+            .sort((a, b) => a.t - b.t)
+            .map((keyframe) => {
+              const snapshot = resolveTimelineKeyframeSnapshot(selectedTimeline, keyframe.id);
+              if (snapshot === null) {
+                return null;
+              }
+              return {
+                keyframeId: keyframe.id,
+                t: keyframe.t,
+                snapshot
+              };
+            })
+            .filter((entry): entry is { keyframeId: string; t: number; snapshot: SessionTimelineSnapshot } => entry !== null)
+        : [];
+    const totalPreviewFrames = Math.max(1, keyframePreviewTargets.length);
+
     setBlockingTask({
       title: "Saving Session Snapshot",
-      message: `Rendering preview for '${normalizedPath}'...`,
+      message:
+        keyframePreviewTargets.length > 0
+          ? `Rendering keyframe previews for '${normalizedPath}'...`
+          : `Rendering preview for '${normalizedPath}'...`,
       detail: `${width}x${height}, ${LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES} subframes`,
       progress: 0
     });
@@ -4893,6 +5190,8 @@ export function App(): JSX.Element {
     const offscreenCanvas = document.createElement("canvas");
     let exportRenderer: FragmentRenderer | null = null;
     let previewImageBlob: Blob | null = null;
+    let previewFrames: SessionSnapshotPreviewFrameRecord[] | null = null;
+    let currentFrameIndexRef = 0;
     try {
       await yieldToUiFrames(1);
 
@@ -4900,64 +5199,94 @@ export function App(): JSX.Element {
         onStatus: (nextStatus) => {
           const targetSubframes = Math.max(1, LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES);
           const subframeProgress = Math.max(0, Math.min(1, nextStatus.subframe / targetSubframes));
+          const frameProgress = keyframePreviewTargets.length > 0 ? currentFrameIndexRef / totalPreviewFrames : 0;
+          const overallProgress = (frameProgress + subframeProgress / totalPreviewFrames) * 0.8;
           setBlockingTask((prev) =>
             prev === null
               ? prev
               : {
                   ...prev,
-                  message: `Rendering preview for '${normalizedPath}'...`,
+                  message:
+                    keyframePreviewTargets.length > 0
+                      ? `Rendering keyframe ${Math.min(currentFrameIndexRef + 1, totalPreviewFrames)}/${totalPreviewFrames} for '${normalizedPath}'...`
+                      : `Rendering preview for '${normalizedPath}'...`,
                   detail: `Subframe ${Math.min(nextStatus.subframe, targetSubframes)}/${targetSubframes}`,
-                  progress: subframeProgress * 0.8
+                  progress: overallProgress
                 }
           );
         }
       });
-      exportRenderer.setRenderSettings({
-        ...renderSettings,
-        interactionResolutionScale: 1,
-        tileCount: 1,
-        tilesPerFrame: 1,
-        maxSubframes: LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES
-      });
-      exportRenderer.setScene({
-        geometrySource: parseResult.shaderSource,
-        geometryLineMap: parseResult.shaderLineMap,
-        uniformDefinitions: parseResult.uniforms,
-        uniformValues,
-        integrator: activeIntegrator,
-        integratorOptions: activeIntegratorOptions
-      });
-      exportRenderer.updateIntegratorOptions(activeIntegratorOptions);
-      exportRenderer.updateUniformValues(uniformValues);
-      exportRenderer.updateSlicePlaneLockFrame(slicePlaneLockFrame);
-      exportRenderer.setCamera(cameraState);
+      const renderPreviewFrame = async (snapshot: SessionTimelineSnapshot): Promise<Blob> => {
+        const renderer = exportRenderer;
+        if (renderer === null) {
+          throw new Error("Session snapshot preview renderer was not initialized.");
+        }
+        const integrator = getIntegratorById(snapshot.integratorId);
+        if (integrator === null) {
+          throw new Error(`Unknown integrator '${snapshot.integratorId}' in timeline snapshot.`);
+        }
+        renderer.setRenderSettings({
+          ...snapshot.renderSettings,
+          interactionResolutionScale: 1,
+          tileCount: 1,
+          tilesPerFrame: 1,
+          maxSubframes: LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES
+        });
+        renderer.setScene({
+          geometrySource: parsed.shaderSource,
+          geometryLineMap: parsed.shaderLineMap,
+          uniformDefinitions: parsed.uniforms,
+          uniformValues: snapshot.uniformValues,
+          integrator,
+          integratorOptions: snapshot.integratorOptions
+        });
+        renderer.updateIntegratorOptions(snapshot.integratorOptions);
+        renderer.updateUniformValues(snapshot.uniformValues);
+        renderer.updateSlicePlaneLockFrame(snapshot.slicePlaneLockFrame);
+        renderer.setCamera(snapshot.camera);
+        await renderer.renderStill({
+          width,
+          height,
+          subframes: LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES
+        });
+        const previewImageData = renderer.captureDisplayImageData();
+        const previewCanvas = document.createElement("canvas");
+        previewCanvas.width = previewImageData.width;
+        previewCanvas.height = previewImageData.height;
+        const previewContext = previewCanvas.getContext("2d");
+        if (previewContext === null) {
+          throw new Error("2D canvas context is unavailable for JPEG preview encoding.");
+        }
+        previewContext.putImageData(previewImageData, 0, 0);
+        return await canvasToJpegBlobLocal(previewCanvas, 0.84);
+      };
 
-      await exportRenderer.renderStill({
-        width,
-        height,
-        subframes: LOCAL_SESSION_SNAPSHOT_PREVIEW_SUBFRAMES
-      });
-
-      setBlockingTask((prev) =>
-        prev === null
-          ? prev
-          : {
-              ...prev,
-              message: `Encoding preview for '${normalizedPath}'...`,
-              detail: "JPEG",
-              progress: 0.9
-            }
-      );
-      const previewImageData = exportRenderer.captureDisplayImageData();
-      const previewCanvas = document.createElement("canvas");
-      previewCanvas.width = previewImageData.width;
-      previewCanvas.height = previewImageData.height;
-      const previewContext = previewCanvas.getContext("2d");
-      if (previewContext === null) {
-        throw new Error("2D canvas context is unavailable for JPEG preview encoding.");
+      if (keyframePreviewTargets.length > 0) {
+        const encodedFrames: SessionSnapshotPreviewFrameRecord[] = [];
+        for (let index = 0; index < keyframePreviewTargets.length; index += 1) {
+          const target = keyframePreviewTargets[index] as (typeof keyframePreviewTargets)[number];
+          currentFrameIndexRef = index;
+          const blob = await renderPreviewFrame(target.snapshot);
+          encodedFrames.push({
+            imageBlob: blob,
+            imageMimeType: blob.type,
+            keyframeId: target.keyframeId,
+            t: target.t
+          });
+        }
+        previewFrames = encodedFrames;
+        previewImageBlob = encodedFrames[0]?.imageBlob ?? null;
+      } else {
+        const currentSnapshot = buildTimelineSnapshot({
+          integratorId: activeIntegratorId,
+          integratorOptions: activeIntegratorOptions,
+          renderSettings,
+          uniformValues,
+          camera: cameraState,
+          slicePlaneLockFrame
+        });
+        previewImageBlob = await renderPreviewFrame(currentSnapshot);
       }
-      previewContext.putImageData(previewImageData, 0, 0);
-      previewImageBlob = await canvasToJpegBlobLocal(previewCanvas, 0.84);
 
       setBlockingTask((prev) =>
         prev === null
@@ -4973,6 +5302,7 @@ export function App(): JSX.Element {
         path: normalizedPath,
         previewImageBlob,
         previewImageMimeType: previewImageBlob.type,
+        previewFrames,
         sessionJson,
         createdAtMs,
         updatedAtMs
@@ -5002,6 +5332,15 @@ export function App(): JSX.Element {
       [normalizedPath]: {
         previewImageBlob,
         previewImageMimeType: previewImageBlob.type,
+        previewFrames:
+          previewFrames === null
+            ? null
+            : previewFrames.map((frame) => ({
+                imageBlob: frame.imageBlob,
+                imageMimeType: frame.imageMimeType,
+                keyframeId: frame.keyframeId,
+                t: frame.t
+              })),
         sessionJson,
         createdAtMs,
         updatedAtMs
@@ -5179,6 +5518,7 @@ export function App(): JSX.Element {
         path: normalizedRequestedPath,
         previewImageBlob: snapshot.previewImageBlob,
         previewImageMimeType: snapshot.previewImageMimeType,
+        previewFrames: snapshot.previewFrames,
         sessionJson: snapshot.sessionJson,
         createdAtMs: snapshot.createdAtMs,
         updatedAtMs
@@ -6517,34 +6857,48 @@ export function App(): JSX.Element {
                 <pre className="error-strip-message-preview">{compileErrorPreview.text}</pre>
               </div>
             ) : null}
-            {shaderError !== null && shaderErrorPreview !== null ? (
+            {shaderError !== null && shaderErrorSummaryLabel !== null ? (
               <div className="error-strip-message">
-                <span className="error-strip-message-label">
-                  Shader error{shaderErrorPreview.truncated ? " (preview)" : ""}:
-                </span>
-                <pre className="error-strip-message-preview">{shaderErrorPreview.text}</pre>
+                <span className="error-strip-message-label">Shader error:</span>
+                <span className="error-strip-summary">{shaderErrorSummaryLabel}</span>
               </div>
             ) : null}
-            {mappedShaderDiagnostics.length > 0 ? (
+            {mappedShaderDiagnosticsDeduped.length > 0 ? (
               <div className="error-strip-diagnostics">
-                {mappedShaderDiagnostics.slice(0, 8).map((entry, index) => (
+                {mappedShaderDiagnosticsDeduped.slice(0, 12).map((entry) => (
                   <button
-                    key={`${entry.mappedSource!.path}:${entry.mappedSource!.line}:${index}`}
+                    key={`${entry.path}:${entry.line}:${entry.message}`}
                     type="button"
                     className="error-diagnostic-button"
-                    onClick={() => onJumpToShaderDiagnostic(index)}
+                    onClick={() => onJumpToShaderDiagnostic(entry.originalIndex)}
                     title={entry.rawLine}
                   >
-                    {entry.mappedSource!.path}:{entry.mappedSource!.line} {entry.message}
+                    {entry.path}:{entry.line} {entry.message}
                   </button>
                 ))}
               </div>
             ) : null}
+            {shaderError !== null && shaderErrorPreview !== null ? (
+              <div className="error-strip-raw-log">
+                <button
+                  type="button"
+                  className="error-strip-raw-toggle"
+                  onClick={() => setShowRawShaderLog((prev) => !prev)}
+                >
+                  {showRawShaderLog ? "Hide raw GLSL log" : "Show raw GLSL log"}
+                </button>
+                {showRawShaderLog ? (
+                  <pre className="error-strip-message-preview">{shaderErrorPreview.text}</pre>
+                ) : null}
+              </div>
+            ) : null}
           </div>
-          <AppButton onClick={() => void onCopyErrorToClipboard()}>
-            Copy Error
-          </AppButton>
-          {errorClipboardStatus !== null ? <span className="error-strip-status">{errorClipboardStatus}</span> : null}
+          <div className="error-strip-actions">
+            <AppButton onClick={() => void onCopyErrorToClipboard()}>
+              Copy Error
+            </AppButton>
+            {errorClipboardStatus !== null ? <span className="error-strip-status">{errorClipboardStatus}</span> : null}
+          </div>
         </div>
       )}
 
@@ -6584,7 +6938,7 @@ export function App(): JSX.Element {
           onSwitchSystem(entryKey);
         }}
         onDeleteLocal={onDeleteLocalSystem}
-        localPreviewUrlByPath={localSessionPreviewUrlsByPath}
+        localPreviewUrlByPath={localPrimaryPreviewUrlByPath}
         onClose={() => setLegacyImportDialogOpen(false)}
       />
       <ConfirmDiscardChangesDialog
@@ -6625,6 +6979,7 @@ export function App(): JSX.Element {
         onClose={onCloseExportDialog}
         onStartExport={() => void onStartExportRender()}
         onStartMovieExport={() => void onStartMovieExportRender()}
+        onStartManifestExport={() => void onStartManifestExportRender()}
         onCancelExport={onCancelExportRender}
         onWidthChange={onExportWidthChange}
         onHeightChange={onExportHeightChange}

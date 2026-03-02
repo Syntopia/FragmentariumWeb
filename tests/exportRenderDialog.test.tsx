@@ -31,6 +31,7 @@ function makeProps(overrides?: Partial<ExportRenderDialogProps>): ExportRenderDi
     onClose: () => undefined,
     onStartExport: () => undefined,
     onStartMovieExport: () => undefined,
+    onStartManifestExport: () => undefined,
     onCancelExport: () => undefined,
     onWidthChange: () => undefined,
     onHeightChange: () => undefined,
@@ -96,7 +97,22 @@ describe("ExportRenderDialog", () => {
     expect(dialog.getByText("Export Image")).toBeInTheDocument();
     expect(dialog.queryByText("Animation timing")).not.toBeInTheDocument();
     expect(dialog.queryByText("Encoding")).not.toBeInTheDocument();
-    expect(dialog.getByText("Embed Preset in Image")).toBeInTheDocument();
+    expect(dialog.getByText("Embed preset in PNG metadata")).toBeInTheDocument();
     expect(dialog.getByRole("button", { name: "Export PNG" })).toBeEnabled();
+  });
+
+  test("supports render manifest animation format", () => {
+    const view = render(
+      <ExportRenderDialog
+        {...makeProps({
+          animationFormat: "render-manifest"
+        })}
+      />
+    );
+    const dialog = within(view.container);
+
+    expect(dialog.getByRole("button", { name: "Render JSON" })).toBeEnabled();
+    expect(dialog.getByText(/precomposed native animation manifest/i)).toBeInTheDocument();
+    expect(dialog.getAllByRole("button", { name: "Export Render JSON" }).at(-1)).toBeEnabled();
   });
 });

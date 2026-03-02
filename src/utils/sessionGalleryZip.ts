@@ -15,8 +15,16 @@ interface SessionGalleryManifestSessionV2 {
   sessionJsonEntryName: string;
   previewImageEntryName: string;
   previewImageMimeType: string;
+  previewFrames?: SessionGalleryManifestPreviewFrameV2[];
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+interface SessionGalleryManifestPreviewFrameV2 {
+  imageEntryName: string;
+  imageMimeType: string;
+  keyframeId: string;
+  t: number;
 }
 
 export interface SessionGalleryZipV2BuildSession {
@@ -24,8 +32,16 @@ export interface SessionGalleryZipV2BuildSession {
   sessionJson: string;
   previewImageBytes: Uint8Array;
   previewImageMimeType: string;
+  previewFrames?: SessionGalleryZipV2BuildPreviewFrame[] | null;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+export interface SessionGalleryZipV2BuildPreviewFrame {
+  imageBytes: Uint8Array;
+  imageMimeType: string;
+  keyframeId: string;
+  t: number;
 }
 
 export interface SessionGalleryZipV2ParsedSession {
@@ -33,8 +49,16 @@ export interface SessionGalleryZipV2ParsedSession {
   sessionJson: string;
   previewImageBytes: Uint8Array;
   previewImageMimeType: string;
+  previewFrames: SessionGalleryZipV2ParsedPreviewFrame[] | null;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+export interface SessionGalleryZipV2ParsedPreviewFrame {
+  imageBytes: Uint8Array;
+  imageMimeType: string;
+  keyframeId: string;
+  t: number;
 }
 
 function normalizeSessionPath(path: string): string {
@@ -128,11 +152,42 @@ export function buildSessionGalleryZipV2Entries(
       data: session.previewImageBytes,
       modifiedAt: new Date(session.updatedAtMs)
     });
+    let previewFrames: SessionGalleryManifestPreviewFrameV2[] | undefined;
+    if (session.previewFrames !== undefined && session.previewFrames !== null && session.previewFrames.length > 0) {
+      previewFrames = [];
+      for (let frameIndex = 0; frameIndex < session.previewFrames.length; frameIndex += 1) {
+        const frame = session.previewFrames[frameIndex] as SessionGalleryZipV2BuildPreviewFrame;
+        const frameMimeType = frame.imageMimeType.trim();
+        if (frameMimeType.length === 0) {
+          throw new Error(`Session '${normalizedPath}' has a preview frame with empty MIME type.`);
+        }
+        if (frame.keyframeId.trim().length === 0) {
+          throw new Error(`Session '${normalizedPath}' has a preview frame with empty keyframeId.`);
+        }
+        if (!Number.isFinite(frame.t)) {
+          throw new Error(`Session '${normalizedPath}' has a preview frame with invalid t value.`);
+        }
+        const frameExt = extensionForPreviewMimeType(frameMimeType);
+        const frameEntryName = `${sessionBase}/preview-frame-${String(frameIndex).padStart(4, "0")}.${frameExt}`;
+        entries.push({
+          name: frameEntryName,
+          data: frame.imageBytes,
+          modifiedAt: new Date(session.updatedAtMs)
+        });
+        previewFrames.push({
+          imageEntryName: frameEntryName,
+          imageMimeType: frameMimeType,
+          keyframeId: frame.keyframeId,
+          t: frame.t
+        });
+      }
+    }
     manifestSessions.push({
       path: normalizedPath,
       sessionJsonEntryName,
       previewImageEntryName,
       previewImageMimeType,
+      previewFrames,
       createdAtMs: session.createdAtMs,
       updatedAtMs: session.updatedAtMs
     });
@@ -165,6 +220,7 @@ function parseManifestSession(value: unknown): SessionGalleryManifestSessionV2 {
   const previewImageMimeType = source.previewImageMimeType;
   const createdAtMs = source.createdAtMs;
   const updatedAtMs = source.updatedAtMs;
+  const previewFramesRaw = source.previewFrames;
   if (typeof path !== "string" || path.trim().length === 0) {
     throw new Error("Session gallery ZIP manifest session entry is missing 'path'.");
   }
@@ -183,11 +239,48 @@ function parseManifestSession(value: unknown): SessionGalleryManifestSessionV2 {
   if (typeof updatedAtMs !== "number" || !Number.isFinite(updatedAtMs)) {
     throw new Error(`Session '${path}' has invalid 'updatedAtMs' in ZIP manifest.`);
   }
+  let previewFrames: SessionGalleryManifestPreviewFrameV2[] | undefined;
+  if (previewFramesRaw !== undefined) {
+    if (!Array.isArray(previewFramesRaw)) {
+      throw new Error(`Session '${path}' has invalid 'previewFrames' in ZIP manifest.`);
+    }
+    const parsedFrames: SessionGalleryManifestPreviewFrameV2[] = [];
+    for (const rawFrame of previewFramesRaw) {
+      if (typeof rawFrame !== "object" || rawFrame === null) {
+        throw new Error(`Session '${path}' has a malformed preview frame entry in ZIP manifest.`);
+      }
+      const frame = rawFrame as Record<string, unknown>;
+      const imageEntryName = frame.imageEntryName;
+      const imageMimeType = frame.imageMimeType;
+      const keyframeId = frame.keyframeId;
+      const t = frame.t;
+      if (typeof imageEntryName !== "string" || imageEntryName.trim().length === 0) {
+        throw new Error(`Session '${path}' has preview frame missing imageEntryName in ZIP manifest.`);
+      }
+      if (typeof imageMimeType !== "string" || imageMimeType.trim().length === 0) {
+        throw new Error(`Session '${path}' has preview frame missing imageMimeType in ZIP manifest.`);
+      }
+      if (typeof keyframeId !== "string" || keyframeId.trim().length === 0) {
+        throw new Error(`Session '${path}' has preview frame missing keyframeId in ZIP manifest.`);
+      }
+      if (typeof t !== "number" || !Number.isFinite(t)) {
+        throw new Error(`Session '${path}' has preview frame with invalid t in ZIP manifest.`);
+      }
+      parsedFrames.push({
+        imageEntryName,
+        imageMimeType,
+        keyframeId,
+        t
+      });
+    }
+    previewFrames = parsedFrames.length > 0 ? parsedFrames : undefined;
+  }
   return {
     path: normalizeSessionPath(path),
     sessionJsonEntryName,
     previewImageEntryName,
     previewImageMimeType,
+    previewFrames,
     createdAtMs,
     updatedAtMs
   };
@@ -242,11 +335,38 @@ export function parseSessionGalleryZipV2(entries: ParsedZipStoreEntry[]): Sessio
       );
     }
 
+    let previewFrames: SessionGalleryZipV2ParsedPreviewFrame[] | null = null;
+    if (session.previewFrames !== undefined) {
+      const parsedFrames: SessionGalleryZipV2ParsedPreviewFrame[] = [];
+      for (const previewFrame of session.previewFrames) {
+        const frameEntry = entryByName.get(previewFrame.imageEntryName);
+        if (frameEntry === undefined) {
+          throw new Error(
+            `Session '${session.path}' references missing preview frame entry '${previewFrame.imageEntryName}'.`
+          );
+        }
+        const inferredFrameMimeType = inferMimeTypeFromPreviewEntryName(previewFrame.imageEntryName);
+        if (inferredFrameMimeType !== null && inferredFrameMimeType !== previewFrame.imageMimeType) {
+          throw new Error(
+            `Session '${session.path}' preview frame MIME mismatch: manifest=${previewFrame.imageMimeType}, file=${inferredFrameMimeType}`
+          );
+        }
+        parsedFrames.push({
+          imageBytes: frameEntry.data,
+          imageMimeType: previewFrame.imageMimeType,
+          keyframeId: previewFrame.keyframeId,
+          t: previewFrame.t
+        });
+      }
+      previewFrames = parsedFrames.length > 0 ? parsedFrames : null;
+    }
+
     parsed.push({
       path: session.path,
       sessionJson: new TextDecoder().decode(sessionJsonEntry.data),
       previewImageBytes: previewImageEntry.data,
       previewImageMimeType: session.previewImageMimeType,
+      previewFrames,
       createdAtMs: session.createdAtMs,
       updatedAtMs: session.updatedAtMs
     });

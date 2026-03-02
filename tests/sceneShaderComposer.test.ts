@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { getIntegratorById } from "../src/core/integrators/definitions";
+import { parseFragmentSource } from "../src/core/parser/fragmentParser";
 import { buildFocusProbeShaderSources, buildSceneShaderSources } from "../src/core/render/shaderComposer";
+import { SYSTEM_INCLUDE_MAP, getSystemById } from "../src/systems/registry";
 
 describe("buildSceneShaderSources", () => {
   test("injects guarded PI constants for legacy Fragmentarium systems", () => {
@@ -26,6 +28,27 @@ float DE(vec3 p) {
     expect(sources.fragmentSource).toContain("void fragmentariumWebInitGlobalsImpl() {}");
     expect(sources.fragmentSource).toContain("fragmentariumWebInitGlobalsImpl();");
     expect(sources.fragmentSource).not.toContain("  init();");
+  });
+
+  test("builds scene shader sources for the default Mandelbulb preset", () => {
+    const mandelbulb = getSystemById("mandelbulb");
+    const parsed = parseFragmentSource({
+      source: mandelbulb.source,
+      sourceName: mandelbulb.name,
+      includeMap: SYSTEM_INCLUDE_MAP
+    });
+    const integrator = getIntegratorById("de-pathtracer-physical");
+
+    const sources = buildSceneShaderSources({
+      geometrySource: parsed.shaderSource,
+      geometryLineMap: parsed.shaderLineMap,
+      integrator
+    });
+
+    expect(parsed.uniforms.length).toBeGreaterThan(0);
+    expect(sources.fragmentSource).toContain("float DE(vec3 p)");
+    expect(sources.fragmentSource).toContain("renderColor(rayOrigin, rayDir)");
+    expect(sources.fragmentLineMap?.length ?? 0).toBeGreaterThan(0);
   });
 
   test("calls legacy init() when geometry defines it", () => {

@@ -17,6 +17,7 @@ export interface SessionGalleryItem {
   path: string;
   tileLabel?: string;
   previewUrl: string;
+  previewUrls?: string[] | null;
   createdAtMs: number | null;
   updatedAtMs: number;
   sourceKind: "local" | "github";
@@ -90,6 +91,8 @@ const GALLERY_SPLITTER_WIDTH_PX = 10;
 const MIN_GALLERY_DIALOG_WIDTH_PX = 680;
 const MIN_GALLERY_DIALOG_HEIGHT_PX = 460;
 const GALLERY_DIALOG_VIEWPORT_MARGIN_PX = 24;
+const TILE_PREVIEW_CYCLE_INTERVAL_MS = 3000;
+const TILE_PREVIEW_FADE_DURATION_MS = 340;
 type SessionGalleryTileSortMode = "name" | "date";
 
 function buildFolderTree(items: SessionGalleryItem[], externalSources: SessionGalleryExternalSource[]): GalleryFolderNode {
@@ -307,12 +310,9 @@ function externalSourceShortLabel(source: SessionGalleryExternalSource): string 
   return rawLabel;
 }
 
-function externalSourceRowTitle(source: SessionGalleryExternalSource): string {
-  const lines = [source.label, source.url];
-  if (source.errorMessage !== null) {
-    lines.push(source.errorMessage);
-  }
-  return lines.join("\n");
+function externalSourceTooltipText(source: SessionGalleryExternalSource): string {
+  const simplifiedUrl = source.url.replace(/^https?:\/\//, "");
+  return `${source.label}\n${simplifiedUrl}`;
 }
 
 function formatGalleryTileDateLabel(timestampMs: number | null): string {
@@ -387,6 +387,8 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
   const [pendingFolderDelete, setPendingFolderDelete] = useState<PendingFolderDeleteState | null>(null);
   const [folderDeleteInProgress, setFolderDeleteInProgress] = useState(false);
   const [folderDeleteError, setFolderDeleteError] = useState<string | null>(null);
+  const [previewCycleTick, setPreviewCycleTick] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
 
   const sortedItems = useMemo(
     () => [...props.items].sort((a, b) => a.path.localeCompare(b.path)),
@@ -415,6 +417,31 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
     () => sortedItems.find((item) => item.path === selectedSessionPath) ?? null,
     [selectedSessionPath, sortedItems]
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = (): void => setReduceMotion(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => {
+      media.removeEventListener("change", update);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!props.open || reduceMotion) {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      setPreviewCycleTick((prev) => prev + 1);
+    }, TILE_PREVIEW_CYCLE_INTERVAL_MS);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [props.open, reduceMotion]);
   const localPathsByFolderPath = useMemo(() => {
     const map = new Map<string, string[]>();
     const append = (folderPath: string, localPath: string): void => {
@@ -518,12 +545,6 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
       externalSource === null
         ? "session-gallery-folder-count"
         : `session-gallery-folder-count is-external-status is-${externalSource.status}`;
-    const folderCountTitle =
-      externalSource === null
-        ? undefined
-        : `Status: ${externalSource.status}. Entries: ${externalSource.itemCount}${
-            externalSource.errorMessage !== null ? `\n${externalSource.errorMessage}` : ""
-          }`;
     return (
       <div key={node.id} className="session-gallery-folder-node">
         <div className="session-gallery-folder-row">
@@ -532,13 +553,17 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
             className={`session-gallery-folder-button${isSelected ? " is-active" : ""}`}
             style={{ paddingLeft: `${8 + depth * 14}px` }}
             onClick={() => setSelectedFolderPath(node.path)}
-            title={externalSource !== null ? externalSourceRowTitle(externalSource) : undefined}
           >
             <span className="session-gallery-folder-name">
               {externalSource !== null ? externalSourceShortLabel(externalSource) : node.name}
             </span>
+            {externalSource !== null ? (
+              <span className="session-gallery-folder-tooltip" role="tooltip">
+                {externalSourceTooltipText(externalSource)}
+              </span>
+            ) : null}
             {externalSource === null ? (
-              <span className={folderCountClassName} title={folderCountTitle}>
+              <span className={folderCountClassName}>
                 {node.itemCount}
               </span>
             ) : null}
@@ -575,7 +600,6 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
               </div>
               <span
                 className={`${folderCountClassName} session-gallery-folder-row-status-badge`}
-                title={folderCountTitle}
               >
                 {externalSourceCountBadgeLabel(externalSource)}
               </span>
@@ -1081,6 +1105,16 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
                   {displayItems.map((item, index) => {
                     const isSelected = item.path === selectedSessionPath;
                     const delayMs = Math.min(TILE_STAGGER_MAX_INDEX, Math.max(0, index)) * TILE_STAGGER_MS;
+                    const previewUrls =
+                      item.previewUrls !== undefined && item.previewUrls !== null && item.previewUrls.length > 0
+                        ? item.previewUrls
+                        : [item.previewUrl];
+                    const previewCount = previewUrls.length;
+                    const activePreviewIndex = previewCount <= 1 || reduceMotion ? 0 : previewCycleTick % previewCount;
+                    const previousPreviewIndex =
+                      previewCount <= 1 || reduceMotion
+                        ? activePreviewIndex
+                        : (activePreviewIndex - 1 + previewCount) % previewCount;
                     return (
                       <button
                         key={`${tileAnimationEpoch}:${item.id}`}
@@ -1093,7 +1127,34 @@ export function SessionGalleryDialog(props: SessionGalleryDialogProps): JSX.Elem
                         title={buildSessionGalleryTileTitle(item)}
                       >
                         <span className="session-gallery-tile-preview" aria-hidden="true">
-                          <img src={item.previewUrl} alt="" loading="lazy" />
+                          {previewCount > 1 && !reduceMotion ? (
+                            <img
+                              key={`prev:${previousPreviewIndex}`}
+                              src={previewUrls[previousPreviewIndex] as string}
+                              alt=""
+                              loading="lazy"
+                              className="session-gallery-tile-preview-image"
+                            />
+                          ) : null}
+                          <img
+                            key={`active:${activePreviewIndex}`}
+                            src={previewUrls[activePreviewIndex] as string}
+                            alt=""
+                            loading="lazy"
+                            className={`session-gallery-tile-preview-image is-active${
+                              previewCount > 1 && !reduceMotion ? " is-fading" : ""
+                            }`}
+                            style={
+                              previewCount > 1 && !reduceMotion
+                                ? ({ animationDuration: `${TILE_PREVIEW_FADE_DURATION_MS}ms` } satisfies CSSProperties)
+                                : undefined
+                            }
+                          />
+                          {previewCount > 1 ? (
+                            <span className="session-gallery-tile-preview-indicator">
+                              {activePreviewIndex + 1}/{previewCount}
+                            </span>
+                          ) : null}
                         </span>
                         <span className="session-gallery-tile-label">{item.tileLabel ?? item.path}</span>
                       </button>

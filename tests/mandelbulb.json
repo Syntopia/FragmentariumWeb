@@ -1,0 +1,1387 @@
+{
+  "format": "fragmentarium-web-settings-v1",
+  "selectedPresetName": null,
+  "integratorId": "de-pathtracer-physical",
+  "integratorOptions": {
+    "detailExp": -4.3,
+    "maxRaySteps": 621,
+    "fudgeFactor": 0.93,
+    "bounceCount": 3,
+    "albedo": 0.88,
+    "roughness": 0.12,
+    "metallic": 0,
+    "reflectivity": 0.68,
+    "diffuseColorR": 0.9,
+    "diffuseColorG": 0.82,
+    "diffuseColorB": 0.72,
+    "useOrbitTrap": 0,
+    "orbitTrapPaletteIndex": 0,
+    "orbitTrapFalloff": 11.42,
+    "orbitTrapHueOffset": 0.53,
+    "orbitTrapHueScale": 2.95,
+    "orbitTrapSaturation": 1,
+    "orbitTrapValue": 2,
+    "orbitTrapMix": 1,
+    "directLight": 1,
+    "sunDirectionX": 0.2417978359190527,
+    "sunDirectionY": 0.7070936715399594,
+    "sunDirectionZ": 0.664494052804841,
+    "sunStrength": 14.77,
+    "skyStrength": 3.35,
+    "fogEnabled": 0,
+    "fog": 0,
+    "fogColorR": 0.29,
+    "fogColorG": 0.34,
+    "fogColorB": 0.42,
+    "iblEnabled": 0,
+    "iblStrength": 1,
+    "iblExposure": 0,
+    "iblZenithX": 0,
+    "iblZenithY": 1,
+    "iblZenithZ": 0,
+    "iblHorizonGlow": 1.79,
+    "iblHotspotStrength": 0.8,
+    "iblHotspotSizeDeg": 12,
+    "iblTopColorR": 0,
+    "iblTopColorG": 0,
+    "iblTopColorB": 0,
+    "iblHorizonColorR": 0.68,
+    "iblHorizonColorG": 0.6422222222222224,
+    "iblHorizonColorB": 0.5666666666666667,
+    "iblGroundColorR": 0,
+    "iblGroundColorG": 0,
+    "iblGroundColorB": 0,
+    "sunAngularDiameterDeg": 0.53,
+    "areaLightEnabled": 1,
+    "areaLightIntensity": 57.95,
+    "areaLightSize": 0.5,
+    "areaLightOffsetX": 0.66,
+    "areaLightOffsetY": 0.18,
+    "areaLightOffsetZ": -0.55,
+    "areaLightColorR": 1,
+    "areaLightColorG": 0.5333333333333333,
+    "areaLightColorB": 0,
+    "aperture": 0.0079,
+    "focalDistance": 3.329582452774048,
+    "aaJitter": 1,
+    "slicePlaneEnabled": 1,
+    "slicePlaneDistance": 1.7,
+    "slicePlaneLock": 1,
+    "slicePlaneKeepFarSide": 1,
+    "maxDistance": 500,
+    "sampleClamp": 3
+  },
+  "renderSettings": {
+    "interactionResolutionScale": 0.75,
+    "maxSubframes": 30,
+    "tileCount": 6,
+    "tilesPerFrame": 1,
+    "aspectRatioLocked": 1,
+    "aspectRatioX": 16,
+    "aspectRatioY": 9,
+    "toneMapping": 3,
+    "exposure": 0.36,
+    "gamma": 2.2,
+    "brightness": 1,
+    "contrast": 1,
+    "saturation": 1
+  },
+  "uniformValues": {
+    "FOV": 0.4,
+    "Eye": [
+      2.0958961750835483,
+      -9.291812500551984,
+      6.273343933058484
+    ],
+    "Target": [
+      5.882879069670913,
+      -9.694724843932137,
+      11.615939693683952
+    ],
+    "Up": [
+      0.04381314865036375,
+      -0.99340324410661,
+      -0.1059735938986892
+    ],
+    "MI": 9,
+    "Size": 1.046,
+    "CSize": [
+      0.965,
+      1.134,
+      0.994
+    ],
+    "C": [
+      1.97016,
+      -0.141,
+      -2
+    ],
+    "DEoffset": 0,
+    "Offset": [
+      0.376,
+      -0.071,
+      -1.694
+    ],
+    "MnIterations": 6,
+    "ColorIterations": 5,
+    "MnScale": 2.996,
+    "MnOffset": [
+      1.15998,
+      1.047,
+      0.988
+    ]
+  },
+  "camera": {
+    "eye": [
+      2.0958961750835483,
+      -9.291812500551984,
+      6.273343933058484
+    ],
+    "target": [
+      5.882879069670913,
+      -9.694724843932137,
+      11.615939693683952
+    ],
+    "up": [
+      0.04381314865036375,
+      -0.99340324410661,
+      -0.1059735938986892
+    ],
+    "fov": 0.4
+  },
+  "slicePlaneLockFrame": {
+    "origin": [
+      1.042258371609278,
+      -3.64287450214547,
+      -1.1625713583606165
+    ],
+    "normal": [
+      -0.48163358079233537,
+      0.6509502608206489,
+      0.5867647329131856
+    ]
+  },
+  "timeline": {
+    "version": 1,
+    "baseline": {
+      "integratorId": "de-pathtracer-physical",
+      "integratorOptions": {
+        "detailExp": -3.9,
+        "maxRaySteps": 316,
+        "fudgeFactor": 0.93,
+        "bounceCount": 3,
+        "albedo": 0.88,
+        "roughness": 0.12,
+        "metallic": 0,
+        "reflectivity": 0.68,
+        "diffuseColorR": 0.9,
+        "diffuseColorG": 0.82,
+        "diffuseColorB": 0.72,
+        "useOrbitTrap": 0,
+        "orbitTrapPaletteIndex": 0,
+        "orbitTrapFalloff": 11.42,
+        "orbitTrapHueOffset": 0.53,
+        "orbitTrapHueScale": 2.95,
+        "orbitTrapSaturation": 1,
+        "orbitTrapValue": 2,
+        "orbitTrapMix": 1,
+        "directLight": 1,
+        "sunDirectionX": 0.2417978359190527,
+        "sunDirectionY": 0.7070936715399594,
+        "sunDirectionZ": 0.664494052804841,
+        "sunStrength": 11.05,
+        "skyStrength": 2.89,
+        "fog": 0,
+        "iblEnabled": 0,
+        "iblStrength": 1,
+        "iblExposure": 0,
+        "iblZenithX": 0,
+        "iblZenithY": 1,
+        "iblZenithZ": 0,
+        "iblHorizonGlow": 1.79,
+        "iblHotspotStrength": 0.8,
+        "iblHotspotSizeDeg": 12,
+        "iblTopColorR": 0,
+        "iblTopColorG": 0,
+        "iblTopColorB": 0,
+        "iblHorizonColorR": 0.68,
+        "iblHorizonColorG": 0.6422222222222224,
+        "iblHorizonColorB": 0.5666666666666667,
+        "iblGroundColorR": 0,
+        "iblGroundColorG": 0,
+        "iblGroundColorB": 0,
+        "sunAngularDiameterDeg": 0.53,
+        "areaLightEnabled": 0,
+        "areaLightIntensity": 6.58,
+        "areaLightSize": 0.5,
+        "areaLightOffsetX": -0.48,
+        "areaLightOffsetY": -0.57,
+        "areaLightOffsetZ": 0,
+        "areaLightColorR": 1,
+        "areaLightColorG": 0.5333333333333333,
+        "areaLightColorB": 0,
+        "aperture": 0.0079,
+        "focalDistance": 1.858824372291565,
+        "aaJitter": 1,
+        "slicePlaneEnabled": 1,
+        "slicePlaneDistance": 1.7,
+        "slicePlaneLock": 1,
+        "slicePlaneKeepFarSide": 1,
+        "maxDistance": 500,
+        "sampleClamp": 3
+      },
+      "renderSettings": {
+        "interactionResolutionScale": 0.75,
+        "maxSubframes": 30,
+        "tileCount": 6,
+        "tilesPerFrame": 1,
+        "aspectRatioLocked": 0,
+        "aspectRatioX": 1,
+        "aspectRatioY": 1,
+        "toneMapping": 3,
+        "exposure": 0.36,
+        "gamma": 2.2,
+        "brightness": 1,
+        "contrast": 1,
+        "saturation": 1
+      },
+      "uniformValues": {
+        "FOV": 0.4,
+        "Eye": [
+          1.042258371609278,
+          -3.64287450214547,
+          -1.1625713583606165
+        ],
+        "Target": [
+          -2.117746388567335,
+          0.6280193990801841,
+          2.687200383176
+        ],
+        "Up": [
+          0.8761635647110776,
+          0.34303544934827285,
+          0.33862086226812105
+        ],
+        "MI": 9,
+        "Size": 1.046,
+        "CSize": [
+          0.965,
+          1.134,
+          0.994
+        ],
+        "C": [
+          1.97016,
+          0.329,
+          -0.229
+        ],
+        "DEoffset": 0,
+        "Offset": [
+          0.448,
+          0.506,
+          -2
+        ],
+        "MnIterations": 6,
+        "ColorIterations": 4,
+        "MnScale": 2.996,
+        "MnOffset": [
+          1.15998,
+          1.22,
+          1.12
+        ]
+      },
+      "camera": {
+        "eye": [
+          1.042258371609278,
+          -3.64287450214547,
+          -1.1625713583606165
+        ],
+        "target": [
+          -2.117746388567335,
+          0.6280193990801841,
+          2.687200383176
+        ],
+        "up": [
+          0.8761635647110776,
+          0.34303544934827285,
+          0.33862086226812105
+        ],
+        "fov": 0.4
+      },
+      "slicePlaneLockFrame": {
+        "origin": [
+          1.042258371609278,
+          -3.64287450214547,
+          -1.1625713583606165
+        ],
+        "normal": [
+          -0.48163358079233537,
+          0.6509502608206489,
+          0.5867647329131856
+        ]
+      }
+    },
+    "keyframes": [
+      {
+        "id": "kmm6217dp_o",
+        "t": 0,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 57.95,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "focalDistance": 3.329582452774048,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              2.0958961750835483,
+              -9.291812500551984,
+              6.273343933058484
+            ],
+            "Target": [
+              5.882879069670913,
+              -9.694724843932137,
+              11.615939693683952
+            ],
+            "Up": [
+              0.04381314865036375,
+              -0.99340324410661,
+              -0.1059735938986892
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              0.376,
+              -0.071,
+              -1.694
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.15998,
+              1.047,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              2.0958961750835483,
+              -9.291812500551984,
+              6.273343933058484
+            ],
+            "target": [
+              5.882879069670913,
+              -9.694724843932137,
+              11.615939693683952
+            ],
+            "up": [
+              0.04381314865036375,
+              -0.99340324410661,
+              -0.1059735938986892
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7t44ud_2",
+        "t": 0.13458798574153816,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 57.95,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "focalDistance": 7.086461544036865,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              2.8578029313081283,
+              -9.372874825134012,
+              7.348225948399846
+            ],
+            "Target": [
+              6.644785825895495,
+              -9.775787168514166,
+              12.690821709025318
+            ],
+            "Up": [
+              0.03377499699671849,
+              -0.9945198019656427,
+              -0.098942473569696
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              0.376,
+              -0.071,
+              -1.694
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.15998,
+              1.047,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              2.8578029313081283,
+              -9.372874825134012,
+              7.348225948399846
+            ],
+            "target": [
+              6.644785825895495,
+              -9.775787168514166,
+              12.690821709025318
+            ],
+            "up": [
+              0.03377499699671849,
+              -0.9945198019656427,
+              -0.098942473569696
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7t4n9y_4",
+        "t": 0.1615055828898458,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 57.95,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "focalDistance": 7.086461544036865,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              3.385943392615527,
+              -9.42906581326955,
+              8.09331539510122
+            ],
+            "Target": [
+              7.172926287202894,
+              -9.831978156649706,
+              13.435911155726693
+            ],
+            "Up": [
+              0.3264614351626437,
+              -0.8966636746189289,
+              -0.2990270656151822
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              0.376,
+              -0.071,
+              -1.694
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.15998,
+              1.047,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              3.385943392615527,
+              -9.42906581326955,
+              8.09331539510122
+            ],
+            "target": [
+              7.172926287202894,
+              -9.831978156649706,
+              13.435911155726693
+            ],
+            "up": [
+              0.3264614351626437,
+              -0.8966636746189289,
+              -0.2990270656151822
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7t4wq1_6",
+        "t": 0.19380669946781492,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 57.95,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "focalDistance": 7.086461544036865,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              4.780060724430453,
+              -9.654982423680659,
+              10.056265981907861
+            ],
+            "Target": [
+              8.544483608805518,
+              -10.64549726201819,
+              15.337829004766256
+            ],
+            "Up": [
+              -0.4213738696067098,
+              -0.8972192346835529,
+              0.1320670546598479
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              0.376,
+              -0.071,
+              -1.694
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.15998,
+              1.047,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              4.780060724430453,
+              -9.654982423680659,
+              10.056265981907861
+            ],
+            "target": [
+              8.544483608805518,
+              -10.64549726201819,
+              15.337829004766256
+            ],
+            "up": [
+              -0.4213738696067098,
+              -0.8972192346835529,
+              0.1320670546598479
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7t5i5g_8",
+        "t": 0.2325680393613779,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 57.95,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "focalDistance": 7.086461544036865,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              5.291972487404546,
+              -9.782038186745936,
+              10.798501876773141
+            ],
+            "Target": [
+              7.789895960242273,
+              -10.545923438941339,
+              16.817120065952714
+            ],
+            "Up": [
+              -0.7511283333969003,
+              -0.6175328718712109,
+              0.23336533360139378
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              0.376,
+              -0.071,
+              -1.694
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.15998,
+              1.047,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              5.291972487404546,
+              -9.782038186745936,
+              10.798501876773141
+            ],
+            "target": [
+              7.789895960242273,
+              -10.545923438941339,
+              16.817120065952714
+            ],
+            "up": [
+              -0.7511283333969003,
+              -0.6175328718712109,
+              0.23336533360139378
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7t5u8h_a",
+        "t": 0.2790816472336535,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 57.95,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "focalDistance": 3.0109503269195557,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              5.291972487404546,
+              -9.782038186745936,
+              10.798501876773141
+            ],
+            "Target": [
+              7.789895960242273,
+              -10.545923438941339,
+              16.817120065952714
+            ],
+            "Up": [
+              -0.7511283333969003,
+              -0.6175328718712109,
+              0.23336533360139378
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              0.376,
+              -0.071,
+              -1.694
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.15998,
+              1.047,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              5.291972487404546,
+              -9.782038186745936,
+              10.798501876773141
+            ],
+            "target": [
+              7.789895960242273,
+              -10.545923438941339,
+              16.817120065952714
+            ],
+            "up": [
+              -0.7511283333969003,
+              -0.6175328718712109,
+              0.23336533360139378
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7t5yap_c",
+        "t": 0.3348979766803842,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "metallic": 0.14,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 43.18,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "areaLightColorG": 0.25098039215686274,
+            "focalDistance": 3.0109503269195557,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              5.5422957416151934,
+              -9.836125033604404,
+              11.496937486664226
+            ],
+            "Target": [
+              7.422556388881488,
+              -10.269603278214417,
+              17.767792593552763
+            ],
+            "Up": [
+              -0.9222597479920013,
+              -0.28917681382181204,
+              0.2565418632145553
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              0.376,
+              -0.071,
+              -1.694
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.15998,
+              1.047,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              5.5422957416151934,
+              -9.836125033604404,
+              11.496937486664226
+            ],
+            "target": [
+              7.422556388881488,
+              -10.269603278214417,
+              17.767792593552763
+            ],
+            "up": [
+              -0.9222597479920013,
+              -0.28917681382181204,
+              0.2565418632145553
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7t7hdw_e",
+        "t": 0.401877572016461,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "metallic": 0.14,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 43.18,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "areaLightColorG": 0.25098039215686274,
+            "focalDistance": 3.0109503269195557,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              5.5422957416151934,
+              -9.836125033604404,
+              11.496937486664226
+            ],
+            "Target": [
+              6.322991233353247,
+              -9.031235679125531,
+              17.961423153600535
+            ],
+            "Up": [
+              -0.9928575015889387,
+              0.023376659672727066,
+              0.11699364649892875
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              0.376,
+              -0.071,
+              -1.694
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.15998,
+              1.047,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              5.5422957416151934,
+              -9.836125033604404,
+              11.496937486664226
+            ],
+            "target": [
+              6.322991233353247,
+              -9.031235679125531,
+              17.961423153600535
+            ],
+            "up": [
+              -0.9928575015889387,
+              0.023376659672727066,
+              0.11699364649892875
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7t8bji_g",
+        "t": 0.48225308641975323,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "metallic": 0.14,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 43.18,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "areaLightColorG": 0.25098039215686274,
+            "focalDistance": 3.0109503269195557,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              5.557935092423412,
+              -9.755444417884943,
+              11.878805372940018
+            ],
+            "Target": [
+              5.824267506441381,
+              -8.359659815699695,
+              18.284096908174337
+            ],
+            "Up": [
+              -0.9953682035767778,
+              0.09382748261265371,
+              0.02094141387084886
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              0.376,
+              -0.8,
+              -1.788
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.15998,
+              1.047,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              5.557935092423412,
+              -9.755444417884943,
+              11.878805372940018
+            ],
+            "target": [
+              5.824267506441381,
+              -8.359659815699695,
+              18.284096908174337
+            ],
+            "up": [
+              -0.9953682035767778,
+              0.09382748261265371,
+              0.02094141387084886
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7t9d04_i",
+        "t": 0.5787037037037038,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "metallic": 0.14,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 43.18,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "areaLightColorG": 0.25098039215686274,
+            "focalDistance": 3.0109503269195557,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              5.548337591192424,
+              -9.64863549080062,
+              12.1239632503989
+            ],
+            "Target": [
+              5.313014456602341,
+              -7.029765128738463,
+              18.135040384393896
+            ],
+            "Up": [
+              -0.970230031693665,
+              0.2058132364482849,
+              -0.12765029299767625
+            ],
+            "CSize": [
+              0.965,
+              1.134,
+              1.012
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              0.376,
+              -0.8,
+              -1.788
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.282,
+              1.247,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              5.548337591192424,
+              -9.64863549080062,
+              12.1239632503989
+            ],
+            "target": [
+              5.313014456602341,
+              -7.029765128738463,
+              18.135040384393896
+            ],
+            "up": [
+              -0.970230031693665,
+              0.2058132364482849,
+              -0.12765029299767625
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7taenl_k",
+        "t": 0.6944444444444445,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "metallic": 0.14,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 43.18,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "areaLightColorG": 0.25098039215686274,
+            "focalDistance": 0.8879329562187195,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              5.508287887415182,
+              -9.202929281701,
+              13.146989987731818
+            ],
+            "Target": [
+              5.272964752825099,
+              -6.584058919638842,
+              19.158067121726813
+            ],
+            "Up": [
+              -0.9764369182958824,
+              -0.20921307261004618,
+              0.05292291411008948
+            ],
+            "CSize": [
+              0.965,
+              1.134,
+              1.012
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              0.376,
+              0.565,
+              -1.788
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.282,
+              1.247,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              5.508287887415182,
+              -9.202929281701,
+              13.146989987731818
+            ],
+            "target": [
+              5.272964752825099,
+              -6.584058919638842,
+              19.158067121726813
+            ],
+            "up": [
+              -0.9764369182958824,
+              -0.20921307261004618,
+              0.05292291411008948
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7tb6ls_m",
+        "t": 0.8333333333333334,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "metallic": 0.14,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 43.18,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "areaLightColorG": 0.25098039215686274,
+            "aperture": 0.1341,
+            "focalDistance": 1.1014987230300903,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9
+          },
+          "uniformValues": {
+            "Eye": [
+              5.508287887415182,
+              -9.202929281701,
+              13.146989987731818
+            ],
+            "Target": [
+              5.272964752825099,
+              -6.584058919638842,
+              19.158067121726813
+            ],
+            "Up": [
+              -0.9764369182958824,
+              -0.20921307261004618,
+              0.05292291411008948
+            ],
+            "CSize": [
+              0.965,
+              1.134,
+              1.012
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              -0.329,
+              0.565,
+              -1.788
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.282,
+              1.247,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              5.508287887415182,
+              -9.202929281701,
+              13.146989987731818
+            ],
+            "target": [
+              5.272964752825099,
+              -6.584058919638842,
+              19.158067121726813
+            ],
+            "up": [
+              -0.9764369182958824,
+              -0.20921307261004618,
+              0.05292291411008948
+            ],
+            "fov": 0.4
+          }
+        }
+      },
+      {
+        "id": "kmm7tc8te_o",
+        "t": 1,
+        "patch": {
+          "integratorOptions": {
+            "detailExp": -4.3,
+            "maxRaySteps": 621,
+            "metallic": 0.14,
+            "sunStrength": 14.77,
+            "skyStrength": 3.35,
+            "areaLightEnabled": 1,
+            "areaLightIntensity": 43.18,
+            "areaLightOffsetX": 0.66,
+            "areaLightOffsetY": 0.18,
+            "areaLightOffsetZ": -0.55,
+            "areaLightColorG": 0.25098039215686274,
+            "aperture": 0.1341,
+            "focalDistance": 1.1014987230300903,
+            "fogEnabled": 0,
+            "fogColorR": 0.29,
+            "fogColorG": 0.34,
+            "fogColorB": 0.42
+          },
+          "renderSettings": {
+            "aspectRatioLocked": 1,
+            "aspectRatioX": 16,
+            "aspectRatioY": 9,
+            "exposure": 0
+          },
+          "uniformValues": {
+            "Eye": [
+              5.508287887415182,
+              -9.202929281701,
+              13.146989987731818
+            ],
+            "Target": [
+              5.272964752825099,
+              -6.584058919638842,
+              19.158067121726813
+            ],
+            "Up": [
+              -0.9764369182958824,
+              -0.20921307261004618,
+              0.05292291411008948
+            ],
+            "CSize": [
+              0.965,
+              1.134,
+              1.012
+            ],
+            "C": [
+              1.97016,
+              -0.141,
+              -2
+            ],
+            "Offset": [
+              -0.329,
+              0.565,
+              -1.788
+            ],
+            "ColorIterations": 5,
+            "MnOffset": [
+              1.282,
+              1.247,
+              0.988
+            ]
+          },
+          "camera": {
+            "eye": [
+              5.508287887415182,
+              -9.202929281701,
+              13.146989987731818
+            ],
+            "target": [
+              5.272964752825099,
+              -6.584058919638842,
+              19.158067121726813
+            ],
+            "up": [
+              -0.9764369182958824,
+              -0.20921307261004618,
+              0.05292291411008948
+            ],
+            "fov": 0.4
+          }
+        }
+      }
+    ],
+    "activeKeyId": "kmm6217dp_o",
+    "playheadT": 0,
+    "interpolation": "ease-in-out",
+    "playbackDurationSeconds": 3,
+    "modifyAllKeyframes": false
+  },
+  "systemDefinition": {
+    "source": "#info Theli-at's Pseudo Kleinian (Scale 1 JuliaBox + Something (here a Menger Sponge)).\n#include \"common-camera-3d.frag\"\n#include \"MathUtils.frag\"\n\nvec4 orbitTrap = vec4(1.0e20);\n#group PseudoKleinian\n\n// Made by Knighty, see this thread:\n// http://www.fractalforums.com/3d-fractal-generation/fragmentarium-an-ide-for-exploring-3d-fractals-and-other-systems-on-the-gpu/msg32270/#msg32270\n\n#define USE_INF_NORM\n\n// Maximum iterations\nuniform int MI; slider[0,5,20]\n\n// Size\nuniform float Size; slider[0,1,2]\n\n// Cubic fold Size\nuniform vec3 CSize; slider[(0,0,0),(1,1,1),(2,2,2)]\n\n// Julia constant\nuniform vec3 C; slider[(-2,-2,-2),(0,0,0),(2,2,2)]\n\n// Basic shape DE Offset\nuniform float DEoffset; slider[0,0,0.01]\n\n// Basic shape Translation\nuniform vec3 Offset; slider[(-2,-2,-2),(0,0,0),(2,2,2)]\n\n//Basic shape\n// Menger Number of iterations.\nuniform int MnIterations;  slider[0,2,20]\nuniform int ColorIterations;  slider[0,2,20]\n\n// Menger Scale parameter. A perfect Menger is 3.0\nuniform float MnScale; slider[0.00,3.0,4.00]\n\n// Menger Scaling center\nuniform vec3 MnOffset; slider[(0,0,0),(1,1,1),(2,2,2)]\n\nfloat Menger(vec3 z)\n{\n  float r;\n\n  int n = 0;\n  // Fold\n  z = abs(z);\n  if (z.x<z.y){ z.xy = z.yx;}\n  if (z.x<z.z){ z.xz = z.zx;}\n  if (z.y<z.z){ z.yz = z.zy;}\n  if (z.z<1./3.){ z.z -=2.*( z.z-1./3.);}\n\n  while (n < MnIterations && dot(z,z)<100.0) {\n\n    z=MnScale* (z-MnOffset)+MnOffset;\n\n    // Fold\n    z = abs(z);\n    if (z.x<z.y){ z.xy = z.yx;}\n    if (z.x< z.z){ z.xz = z.zx;}\n    if (z.y<z.z){ z.yz = z.zy;}\n    if (z.z<1./3.*MnOffset.z){ z.z -=2.*( z.z-1./3.*MnOffset.z);}\n\n    r = dot(z-MnOffset, z-MnOffset);\n    //orbitTrap = min(orbitTrap, abs(vec4(z,r)));\n\n    n++;\n  }\n\n  //return (length(z)-sqrt(3.) ) * pow(Scale, float(-n));\n  return float(z.x-MnOffset) * pow(MnScale, float(-n));\n}\n\nfloat Thing2(vec3 p){\n  //Just scale=1 Julia box\n#ifdef USE_INF_NORM\n  vec3 p1=abs(p);\n  float r2=max(p1.x,max(p1.y,p1.z));\n#else\n  float r2=dot(p,p);\n#endif\n  float DEfactor=1.;\n\n  for(int i=0;i<MI && r2<60.;i++){\n    p=2.*clamp(p, -CSize, CSize)-p;\n\n    r2=dot(p,p);\n    //orbitTrap = min(orbitTrap, abs(vec4(p,r2)));\n    float k=max(Size/r2,1.);\n    p*=k;DEfactor*=k;\n\n    p+=C;\n#ifdef USE_INF_NORM\n    p1=abs(p);\n    r2=max(p1.x,max(p1.y,p1.z));\n#else\n    r2=dot(p,p);\n#endif\n    if (i < ColorIterations) orbitTrap = min(orbitTrap, abs(vec4(p,r2)));\n  }\n  //Call basic shape and scale its DE\n  return abs(0.5*Menger(p-Offset)/DEfactor-DEoffset);\n}\n\nfloat DE(vec3 p){\n  return  Thing2(p);//RoundBox(p, CSize, Offset);\n}\n",
+    "treePath": "Sessions/Movie 2",
+    "sourcePath": "session/Movie 2.frag",
+    "selectedSystemKey": "local:Movie 2"
+  }
+}

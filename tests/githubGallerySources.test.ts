@@ -23,7 +23,8 @@ describe("githubGallerySources", () => {
     expect(parsed.repo).toBe("FragmentariumWeb");
     expect(parsed.branch).toBe("main");
     expect(parsed.path).toBe("factory sessions/sessions");
-    expect(parsed.sourceTreePath).toBe("GitHub/Syntopia/FragmentariumWeb/main/factory sessions/sessions");
+    expect(parsed.sourceTreePath).toBe("GitHub/Syntopia/FragmentariumWeb::factory%20sessions%2Fsessions");
+    expect(parsed.sourceLabel).toBe("FragmentariumWeb/factory sessions/sessions");
     expect(parsed.id).toBe("github:Syntopia/FragmentariumWeb@main:factory sessions/sessions");
   });
 
@@ -36,8 +37,24 @@ describe("githubGallerySources", () => {
       throw new Error("Expected zip source.");
     }
     expect(parsed.id).toContain("github-zip:");
-    expect(parsed.sourceTreePath).toContain("GitHub/zip:");
-    expect(parsed.sourceLabel).toContain("session-gallery.zip");
+    expect(parsed.sourceTreePath).toBe("GitHub/Syntopia/FragmentariumWeb::gallery%2Fsession-gallery.zip");
+    expect(parsed.sourceLabel).toBe("FragmentariumWeb/session-gallery.zip");
+  });
+
+  test("normalizes github blob zip URLs to raw.githubusercontent.com", () => {
+    const parsed = parseGitHubGalleryTreeUrl(
+      "https://github.com/Syntopia/FragmentariumWeb/blob/main/factory%20sessions/factory-sessions.zip"
+    );
+    expect(parsed.kind).toBe("zip");
+    if (parsed.kind !== "zip") {
+      throw new Error("Expected zip source.");
+    }
+    expect(parsed.url).toBe(
+      "https://raw.githubusercontent.com/Syntopia/FragmentariumWeb/main/factory%20sessions/factory-sessions.zip"
+    );
+    expect(parsed.id).toBe(
+      "github-zip:https://raw.githubusercontent.com/Syntopia/FragmentariumWeb/main/factory%20sessions/factory-sessions.zip"
+    );
   });
 
   test("rejects non-tree github URLs", () => {
