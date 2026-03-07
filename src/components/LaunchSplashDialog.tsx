@@ -15,6 +15,8 @@ interface GpuCheckSummary {
 
 const SPLASH_INIT_DELAY_MS = 1100;
 const SPLASH_GPU_CHECK_MIN_DELAY_MS = 1100;
+const SPLASH_TIME_SCALE = 0.05;
+const SPLASH_POINTER_SENSITIVITY = 0.3;
 
 const SPLASH_VERTEX_SHADER_SOURCE = `#version 300 es
 layout(location = 0) in vec2 a_position;
@@ -318,7 +320,7 @@ export function LaunchSplashDialog(props: LaunchSplashDialogProps): JSX.Element 
       gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
       if (uniformTime !== null) {
-        gl.uniform1f(uniformTime, (performance.now() - t0) * 0.001);
+        gl.uniform1f(uniformTime, (performance.now() - t0) * 0.001 * SPLASH_TIME_SCALE);
       }
       if (uniformResolution !== null) {
         gl.uniform2f(uniformResolution, canvas.width, canvas.height);
@@ -423,8 +425,8 @@ export function LaunchSplashDialog(props: LaunchSplashDialogProps): JSX.Element 
     const normalizedX = (clientX - rect.left) / rect.width;
     const normalizedY = (clientY - rect.top) / rect.height;
     pointerRef.current = [
-      clamp((normalizedX - 0.5) * 2, -1.0, 1.0),
-      clamp((normalizedY - 0.5) * 2, -1.0, 1.0)
+      clamp((normalizedX - 0.5) * 2 * SPLASH_POINTER_SENSITIVITY, -1.0, 1.0),
+      clamp((normalizedY - 0.5) * 2 * SPLASH_POINTER_SENSITIVITY, -1.0, 1.0)
     ];
   };
 
